@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QPlainTextEdit,
     QFileDialog,
+    QSplitter,
 )
 from PySide6.QtCore import Qt, QThread, Signal
 
@@ -18,6 +19,7 @@ from app.model_registry import get_model_registry, assess_model_compatibility
 from app.ollama_client import is_ollama_available, pull_model
 from app.llm_inference import run_inference
 from app.document_ingestion import ingest_file
+from app.rule_engine import run_rules
 
 
 # ---------------- Worker Threads ---------------- #
@@ -67,11 +69,12 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.models = get_model_registry()
-        self.download_worker: ModelDownloadWorker | None = None
-        self.chat_worker: ChatInferenceWorker | None = None
+        self.download_worker = None
+        self.chat_worker = None
 
-        # Phase 7: runtime-only storage (no persistence)
+        # Phase 7 / 8 runtime state
         self.ingested_chunks: list[dict] = []
+        self.rule_findings: list[dict] = []
 
         self._initialize_ui()
 
@@ -94,7 +97,7 @@ class MainWindow(QMainWindow):
 
     def _initialize_ui(self) -> None:
         self.setWindowTitle("Offline Hybrid Vulnerability Analysis Assistant")
-        self.setMinimumSize(1100, 900)
+        self.setMinimumSize(1100, 950)
 
         self._create_menu_bar()
         self._create_central_widget()
@@ -103,17 +106,15 @@ class MainWindow(QMainWindow):
         menu_bar = self.menuBar()
 
         file_menu = menu_bar.addMenu("File")
-        exit_action = file_menu.addAction("Exit")
-        exit_action.triggered.connect(self.close)
+        file_menu.addAction("Exit").triggered.connect(self.close)
 
         help_menu = menu_bar.addMenu("Help")
-        about_action = help_menu.addAction("About")
-        about_action.triggered.connect(self._show_about_dialog)
+        help_menu.addAction("About").triggered.connect(self._show_about_dialog)
 
     def _create_central_widget(self) -> None:
         hardware = detect_hardware()
 
-        # ---------- Hardware + Model Info ---------- #
+        # ---------- Hardware & Model Info ---------- #
 
         info_lines = [
             "Detected Hardware:",
@@ -136,9 +137,6 @@ class MainWindow(QMainWindow):
 
         info_label = QLabel("\n".join(info_lines))
         info_label.setWordWrap(True)
-        info_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-
-        # ---------- Model Controls ---------- #
 
         self.model_selector = QComboBox()
         for model in self.models:
@@ -147,18 +145,36 @@ class MainWindow(QMainWindow):
         self.download_button = QPushButton("Download Selected Model")
         self.download_button.clicked.connect(self._handle_download)
 
-        # ---------- Phase 7: Document Ingestion ---------- #
+        top_panel = QWidget()
+        top_layout = QVBoxLayout(top_panel)
+        top_layout.addWidget(info_label)
+        top_layout.addWidget(QLabel("Select model:"))
+        top_layout.addWidget(self.model_selector)
+        top_layout.addWidget(self.download_button)
+
+        # ---------- Documents & Findings ---------- #
 
         self.load_docs_button = QPushButton("Load Document(s)")
         self.load_docs_button.clicked.connect(self._handle_load_documents)
 
-        self.ingestion_status = QPlainTextEdit()
-        self.ingestion_status.setReadOnly(True)
-        self.ingestion_status.setPlaceholderText(
-            "Loaded documents and chunk counts will appear here."
-        )
+        self.ingestion_status = QPlainTextEdit(readOnly=True)
+        self.ingestion_status.setMinimumHeight(80)
 
-        # ---------- Chat UI (Phase 6) ---------- #
+        self.scan_button = QPushButton("Run Rule-Based Scan")
+        self.scan_button.clicked.connect(self._handle_rule_scan)
+
+        self.findings_view = QPlainTextEdit(readOnly=True)
+
+        middle_panel = QWidget()
+        middle_layout = QVBoxLayout(middle_panel)
+        middle_layout.addWidget(QLabel("Documents"))
+        middle_layout.addWidget(self.load_docs_button)
+        middle_layout.addWidget(self.ingestion_status)
+        middle_layout.addWidget(self.scan_button)
+        middle_layout.addWidget(QLabel("Findings"))
+        middle_layout.addWidget(self.findings_view)
+
+        # ---------- Chat ---------- #
 
         self.chat_display = QPlainTextEdit(readOnly=True)
 
@@ -179,30 +195,31 @@ class MainWindow(QMainWindow):
         chat_buttons.addWidget(self.stop_button)
         chat_buttons.addWidget(self.reset_button)
 
-        # ---------- Layout ---------- #
+        bottom_panel = QWidget()
+        bottom_layout = QVBoxLayout(bottom_panel)
+        bottom_layout.addWidget(QLabel("Chat"))
+        bottom_layout.addWidget(self.chat_display)
+        bottom_layout.addWidget(self.chat_input)
+        bottom_layout.addLayout(chat_buttons)
 
-        layout = QVBoxLayout()
-        layout.addWidget(info_label)
-        layout.addWidget(QLabel("Select model:"))
-        layout.addWidget(self.model_selector)
-        layout.addWidget(self.download_button)
+        # ---------- Splitter ---------- #
 
-        layout.addSpacing(10)
-        layout.addWidget(QLabel("Documents:"))
-        layout.addWidget(self.load_docs_button)
-        layout.addWidget(self.ingestion_status)
+        splitter = QSplitter(Qt.Vertical)
+        splitter.addWidget(top_panel)
+        splitter.addWidget(middle_panel)
+        splitter.addWidget(bottom_panel)
 
-        layout.addSpacing(10)
-        layout.addWidget(QLabel("Chat:"))
-        layout.addWidget(self.chat_display)
-        layout.addWidget(self.chat_input)
-        layout.addLayout(chat_buttons)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 2)
+        splitter.setStretchFactor(2, 2)
 
         container = QWidget()
-        container.setLayout(layout)
+        layout = QVBoxLayout(container)
+        layout.addWidget(splitter)
         self.setCentralWidget(container)
 
-    # ---------- Phase 4: Controlled Download ---------- #
+
+    # ---------- Phase 4 ---------- #
 
     def _handle_download(self) -> None:
         if not is_ollama_available():
@@ -210,37 +227,32 @@ class MainWindow(QMainWindow):
             return
 
         self._cleanup_workers()
-
         model = self.models[self.model_selector.currentIndex()]
         self.download_worker = ModelDownloadWorker(model["ollama_id"])
         self.download_worker.finished.connect(self._on_download_finished)
         self.download_worker.start()
 
     def _on_download_finished(self, success: bool, message: str) -> None:
-        QMessageBox.information(
-            self,
-            "Download Result",
-            message if success else f"Download failed: {message}",
-        )
+        QMessageBox.information(self, "Download Result", message)
         self.download_worker = None
 
-    # ---------- Phase 7: Document Ingestion ---------- #
+    # ---------- Phase 7 ---------- #
 
     def _handle_load_documents(self) -> None:
-        file_paths, _ = QFileDialog.getOpenFileNames(
+        paths, _ = QFileDialog.getOpenFileNames(
             self,
             "Select Documents",
             "",
-            "Supported Files (*.txt *.log *.csv *.json)",
+            "Supported Files (*.txt *.log *.conf *,config *.csv *.json)",
         )
-
-        if not file_paths:
+        if not paths:
             return
 
         self.ingested_chunks.clear()
         self.ingestion_status.clear()
+        self.findings_view.clear()
 
-        for path in file_paths:
+        for path in paths:
             try:
                 chunks = ingest_file(path)
                 self.ingested_chunks.extend(chunks)
@@ -252,7 +264,33 @@ class MainWindow(QMainWindow):
                     f"{path} → ERROR: {exc}"
                 )
 
-    # ---------- Phase 6: Chat ---------- #
+    # ---------- Phase 8 ---------- #
+
+    def _handle_rule_scan(self) -> None:
+        self.findings_view.clear()
+
+        if not self.ingested_chunks:
+            self.findings_view.appendPlainText(
+                "No documents loaded. Please load documents first."
+            )
+            return
+
+        self.rule_findings = run_rules(self.ingested_chunks)
+
+        if not self.rule_findings:
+            self.findings_view.appendPlainText("No security findings detected.")
+            return
+
+        for finding in self.rule_findings:
+            self.findings_view.appendPlainText(
+                f"[{finding['rule_id']}] {finding['title']}\n"
+                f"Severity (suggested): {finding['severity_suggested']}\n"
+                f"Source: {finding['evidence']['source_file']}\n"
+                f"Confidence: {finding['confidence']}\n"
+                "----\n"
+            )
+
+    # ---------- Phase 6 ---------- #
 
     def _handle_send(self) -> None:
         prompt = self.chat_input.toPlainText().strip()
@@ -264,7 +302,6 @@ class MainWindow(QMainWindow):
             return
 
         self._cleanup_workers()
-
         self.chat_display.appendPlainText(f"User: {prompt}\n")
         self.chat_input.clear()
 
@@ -294,6 +331,6 @@ class MainWindow(QMainWindow):
             self,
             "About",
             "Offline Hybrid Vulnerability Analysis Assistant\n\n"
-            "Phase 7: Raw document ingestion and deterministic chunking.\n"
-            "No analysis or persistence is performed.",
+            "Phase 8: Deterministic rule-based security signal detection.\n"
+            "No LLM involvement in findings.",
         )

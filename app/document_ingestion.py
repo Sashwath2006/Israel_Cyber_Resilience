@@ -8,10 +8,10 @@ def ingest_file(file_path: str) -> list[dict]:
     path = Path(file_path)
     suffix = path.suffix.lower().lstrip(".")
 
-    if suffix not in {"txt", "log", "csv", "json"}:
+    if suffix not in {"txt", "log", "conf", "config", "csv", "json"}:
         raise ValueError(f"Unsupported file type: {suffix}")
 
-    if suffix in {"txt", "log"}:
+    if suffix in {"txt", "log", "conf", "config"}:
         return _ingest_text(path, suffix)
     if suffix == "csv":
         return _ingest_csv(path)

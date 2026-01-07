@@ -1,0 +1,4 @@
+service.name=inventory
+log.level=INFO
+timeout=30
+retry.count=3
