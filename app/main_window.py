@@ -12,6 +12,7 @@ from PySide6.QtCore import Qt, QThread, Signal
 from app.hardware import detect_hardware
 from app.model_registry import get_model_registry, assess_model_compatibility
 from app.ollama_client import is_ollama_available, pull_model
+from app.llm_inference import run_inference
 
 
 class ModelDownloadWorker(QThread):
@@ -56,6 +57,7 @@ class MainWindow(QMainWindow):
 
         lines: list[str] = []
 
+        # Hardware info
         lines.append("Detected Hardware:")
         lines.append(
             f"CPU: {hardware['cpu']['model']} "
@@ -83,6 +85,7 @@ class MainWindow(QMainWindow):
         info_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         info_label.setWordWrap(True)
 
+        # Model selector
         self.model_selector = QComboBox()
         for model in self.models:
             self.model_selector.addItem(model["name"])
@@ -90,14 +93,20 @@ class MainWindow(QMainWindow):
         self.download_button = QPushButton("Download Selected Model")
         self.download_button.clicked.connect(self._handle_download_clicked)
 
+        self.inference_button = QPushButton("Run Test Inference")
+        self.inference_button.clicked.connect(self._handle_test_inference)
+
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.addWidget(info_label)
-        layout.addWidget(QLabel("Select model to download:"))
+        layout.addWidget(QLabel("Select model:"))
         layout.addWidget(self.model_selector)
         layout.addWidget(self.download_button)
+        layout.addWidget(self.inference_button)
 
         self.setCentralWidget(container)
+
+    # ---------- Phase 4: Controlled download ----------
 
     def _handle_download_clicked(self) -> None:
         if not is_ollama_available():
@@ -134,11 +143,36 @@ class MainWindow(QMainWindow):
 
         self.worker = None
 
+    # ---------- Phase 5: Stateless inference (test harness only) ----------
+
+    def _handle_test_inference(self) -> None:
+        selected_model = self.models[self.model_selector.currentIndex()]
+
+        prompt = "Explain what SQL injection is in two sentences."
+
+        success, result = run_inference(
+            model_id=selected_model["ollama_id"],
+            prompt=prompt,
+        )
+
+        if success:
+            QMessageBox.information(
+                self,
+                "Inference Result",
+                result,
+            )
+        else:
+            QMessageBox.critical(
+                self,
+                "Inference Failed",
+                result,
+            )
+
     def _show_about_dialog(self) -> None:
         QMessageBox.information(
             self,
             "About",
             "Offline Hybrid Vulnerability Analysis Assistant\n\n"
-            "Phase 4: Explicit, user-controlled model download.\n"
-            "Downloads are executed in a controlled background worker.",
+            "Phase 5: Stateless local LLM inference backend.\n"
+            "Each inference call is independent. No memory is retained.",
         )
