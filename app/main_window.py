@@ -5,7 +5,10 @@ from PySide6.QtWidgets import (
     QPushButton,
     QWidget,
     QVBoxLayout,
+    QHBoxLayout,
     QComboBox,
+    QTextEdit,
+    QPlainTextEdit,
 )
 from PySide6.QtCore import Qt, QThread, Signal
 
@@ -15,28 +18,78 @@ from app.ollama_client import is_ollama_available, pull_model
 from app.llm_inference import run_inference
 
 
+# ---------------- Worker Threads ---------------- #
+
 class ModelDownloadWorker(QThread):
     finished = Signal(bool, str)
 
     def __init__(self, model_id: str):
         super().__init__()
         self.model_id = model_id
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        self._cancelled = True
 
     def run(self) -> None:
+        if self._cancelled:
+            return
         success, message = pull_model(self.model_id)
-        self.finished.emit(success, message)
+        if not self._cancelled:
+            self.finished.emit(success, message)
 
+
+class ChatInferenceWorker(QThread):
+    finished = Signal(bool, str)
+
+    def __init__(self, model_id: str, prompt: str):
+        super().__init__()
+        self.model_id = model_id
+        self.prompt = prompt
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    def run(self) -> None:
+        if self._cancelled:
+            return
+        success, result = run_inference(self.model_id, self.prompt)
+        if not self._cancelled:
+            self.finished.emit(success, result)
+
+
+# ---------------- Main Window ---------------- #
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.models = get_model_registry()
-        self.worker: ModelDownloadWorker | None = None
+        self.download_worker: ModelDownloadWorker | None = None
+        self.chat_worker: ChatInferenceWorker | None = None
         self._initialize_ui()
+
+    # ---------- Lifecycle Safety ---------- #
+
+    def closeEvent(self, event) -> None:
+        self._cleanup_workers()
+        event.accept()
+
+    def _cleanup_workers(self) -> None:
+        for worker in (self.chat_worker, self.download_worker):
+            if worker and worker.isRunning():
+                worker.cancel()
+                worker.quit()
+                worker.wait()
+
+        self.chat_worker = None
+        self.download_worker = None
+
+    # ---------- UI ---------- #
 
     def _initialize_ui(self) -> None:
         self.setWindowTitle("Offline Hybrid Vulnerability Analysis Assistant")
-        self.setMinimumSize(1000, 700)
+        self.setMinimumSize(1100, 800)
 
         self._create_menu_bar()
         self._create_central_widget()
@@ -55,124 +108,124 @@ class MainWindow(QMainWindow):
     def _create_central_widget(self) -> None:
         hardware = detect_hardware()
 
-        lines: list[str] = []
-
-        # Hardware info
-        lines.append("Detected Hardware:")
-        lines.append(
+        info = [
+            "Detected Hardware:",
             f"CPU: {hardware['cpu']['model']} "
-            f"({hardware['cpu']['cores']} cores / {hardware['cpu']['threads']} threads)"
-        )
-        lines.append(f"RAM: {hardware['ram']['total_gb']} GB")
-
-        gpu = hardware["gpu"]
-        if gpu["available"]:
-            lines.append(f"GPU: {gpu['model']} ({gpu['vram_gb']} GB VRAM)")
-        else:
-            lines.append("GPU: Not detected")
-
-        lines.append("")
-        lines.append("Available Models:")
+            f"({hardware['cpu']['cores']} cores / {hardware['cpu']['threads']} threads)",
+            f"RAM: {hardware['ram']['total_gb']} GB",
+            f"GPU: {hardware['gpu']['model']} ({hardware['gpu']['vram_gb']} GB VRAM)"
+            if hardware["gpu"]["available"]
+            else "GPU: Not detected",
+            "",
+            "Available Models:",
+        ]
 
         for model in self.models:
-            lines.append(f"• {model['name']} ({model['parameter_size']})")
-            lines.append(f"  {model['description']}")
+            info.append(f"• {model['name']} ({model['parameter_size']})")
+            info.append(f"  {model['description']}")
             for note in assess_model_compatibility(model, hardware):
-                lines.append(f"  ⚠ {note}")
-            lines.append("")
+                info.append(f"  ⚠ {note}")
+            info.append("")
 
-        info_label = QLabel("\n".join(lines))
-        info_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        info_label = QLabel("\n".join(info))
         info_label.setWordWrap(True)
 
-        # Model selector
         self.model_selector = QComboBox()
         for model in self.models:
             self.model_selector.addItem(model["name"])
 
         self.download_button = QPushButton("Download Selected Model")
-        self.download_button.clicked.connect(self._handle_download_clicked)
+        self.download_button.clicked.connect(self._handle_download)
 
-        self.inference_button = QPushButton("Run Test Inference")
-        self.inference_button.clicked.connect(self._handle_test_inference)
+        self.chat_display = QPlainTextEdit(readOnly=True)
+        self.chat_input = QTextEdit()
+        self.chat_input.setFixedHeight(80)
 
-        container = QWidget()
-        layout = QVBoxLayout(container)
+        self.send_button = QPushButton("Send")
+        self.send_button.clicked.connect(self._handle_send)
+
+        self.stop_button = QPushButton("Stop")
+        self.stop_button.clicked.connect(self._handle_stop)
+
+        self.reset_button = QPushButton("Reset Session")
+        self.reset_button.clicked.connect(self._handle_reset)
+
+        button_row = QHBoxLayout()
+        button_row.addWidget(self.send_button)
+        button_row.addWidget(self.stop_button)
+        button_row.addWidget(self.reset_button)
+
+        layout = QVBoxLayout()
         layout.addWidget(info_label)
-        layout.addWidget(QLabel("Select model:"))
         layout.addWidget(self.model_selector)
         layout.addWidget(self.download_button)
-        layout.addWidget(self.inference_button)
+        layout.addWidget(self.chat_display)
+        layout.addWidget(self.chat_input)
+        layout.addLayout(button_row)
 
+        container = QWidget()
+        container.setLayout(layout)
         self.setCentralWidget(container)
 
-    # ---------- Phase 4: Controlled download ----------
+    # ---------- Download ---------- #
 
-    def _handle_download_clicked(self) -> None:
+    def _handle_download(self) -> None:
         if not is_ollama_available():
-            QMessageBox.critical(
-                self,
-                "Ollama Not Available",
-                "Ollama is not running or cannot be reached.\n\n"
-                "Please start Ollama and try again.",
-            )
+            QMessageBox.critical(self, "Error", "Ollama not available.")
             return
 
-        selected_model = self.models[self.model_selector.currentIndex()]
+        self._cleanup_workers()
+        model = self.models[self.model_selector.currentIndex()]
+        self.download_worker = ModelDownloadWorker(model["ollama_id"])
+        self.download_worker.finished.connect(self._on_download_finished)
+        self.download_worker.start()
 
-        self.download_button.setEnabled(False)
+    def _on_download_finished(self, success: bool, msg: str) -> None:
+        QMessageBox.information(self, "Download", msg)
+        self.download_worker = None
 
-        QMessageBox.information(
-            self,
-            "Downloading Model",
-            f"Downloading model: {selected_model['name']}\n\n"
-            "The application will remain responsive during the download.",
+    # ---------- Chat ---------- #
+
+    def _handle_send(self) -> None:
+        prompt = self.chat_input.toPlainText().strip()
+        if not prompt:
+            return
+
+        if not is_ollama_available():
+            QMessageBox.critical(self, "Error", "Ollama not available.")
+            return
+
+        self._cleanup_workers()
+
+        self.chat_display.appendPlainText(f"User: {prompt}\n")
+        self.chat_input.clear()
+
+        model = self.models[self.model_selector.currentIndex()]
+        self.chat_worker = ChatInferenceWorker(model["ollama_id"], prompt)
+        self.chat_worker.finished.connect(self._on_chat_finished)
+        self.chat_worker.start()
+
+    def _on_chat_finished(self, success: bool, result: str) -> None:
+        self.chat_display.appendPlainText(
+            f"{'Assistant' if success else 'Error'}: {result}\n"
         )
+        self.chat_worker = None
 
-        self.worker = ModelDownloadWorker(selected_model["ollama_id"])
-        self.worker.finished.connect(self._on_download_finished)
-        self.worker.start()
+    def _handle_stop(self) -> None:
+        self._cleanup_workers()
+        self.chat_display.appendPlainText("⚠ Inference cancelled.\n")
 
-    def _on_download_finished(self, success: bool, message: str) -> None:
-        self.download_button.setEnabled(True)
+    def _handle_reset(self) -> None:
+        self._cleanup_workers()
+        self.chat_display.clear()
+        self.chat_input.clear()
 
-        if success:
-            QMessageBox.information(self, "Download Complete", message)
-        else:
-            QMessageBox.critical(self, "Download Failed", message)
-
-        self.worker = None
-
-    # ---------- Phase 5: Stateless inference (test harness only) ----------
-
-    def _handle_test_inference(self) -> None:
-        selected_model = self.models[self.model_selector.currentIndex()]
-
-        prompt = "Explain what SQL injection is in two sentences."
-
-        success, result = run_inference(
-            model_id=selected_model["ollama_id"],
-            prompt=prompt,
-        )
-
-        if success:
-            QMessageBox.information(
-                self,
-                "Inference Result",
-                result,
-            )
-        else:
-            QMessageBox.critical(
-                self,
-                "Inference Failed",
-                result,
-            )
+    # ---------- About ---------- #
 
     def _show_about_dialog(self) -> None:
         QMessageBox.information(
             self,
             "About",
-            "Offline Hybrid Vulnerability Analysis Assistant\n\n"
-            "Phase 5: Stateless local LLM inference backend.\n"
-            "Each inference call is independent. No memory is retained.",
+            "Phase 6: Chat UI with strict session isolation.\n"
+            "All threads are safely terminated on reset and exit.",
         )
