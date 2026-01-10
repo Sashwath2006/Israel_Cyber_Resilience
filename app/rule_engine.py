@@ -1,6 +1,8 @@
 import re
 import uuid
 
+from rules.metadata import validate_rule_metadata
+
 # ============================================================
 # FALSE POSITIVE SUPPRESSION (DETERMINISTIC & AUDITABLE)
 # ============================================================
@@ -47,26 +49,38 @@ RULES = [
 
     {
         "rule_id": "A-001",
+        "name": "Hardcoded password detected",
         "category": "Credentials",
         "title": "Hardcoded password detected",
+        "default_severity_hint": "High",
         "severity": "High",
+        "confidence_weight": 0.95,
         "confidence": 0.95,
+        "references": [],
         "patterns": [r"\bpassword\b\s*=", r"\bpwd\b\s*="],
     },
     {
         "rule_id": "A-002",
+        "name": "API key or token detected",
         "category": "Credentials",
         "title": "API key or token detected",
+        "default_severity_hint": "High",
         "severity": "High",
+        "confidence_weight": 0.95,
         "confidence": 0.95,
+        "references": [],
         "patterns": [r"\bapi[_-]?key\b\s*=", r"\btoken\b\s*="],
     },
     {
         "rule_id": "A-003",
+        "name": "Private key material detected",
         "category": "Credentials",
         "title": "Private key material detected",
+        "default_severity_hint": "High",
         "severity": "High",
+        "confidence_weight": 1.0,
         "confidence": 1.0,
+        "references": [],
         "patterns": [
             r"-----begin private key-----",
             r"-----begin rsa private key-----",
@@ -74,10 +88,14 @@ RULES = [
     },
     {
         "rule_id": "A-004",
+        "name": "Cloud provider credential detected",
         "category": "Credentials",
         "title": "Cloud provider credential detected",
+        "default_severity_hint": "High",
         "severity": "High",
+        "confidence_weight": 0.98,
         "confidence": 0.98,
+        "references": [],
         "patterns": [
             r"akia[0-9a-z]{16}",      # AWS
             r"accountkey\s*=",        # Azure
@@ -90,26 +108,38 @@ RULES = [
 
     {
         "rule_id": "B-001",
+        "name": "Authentication disabled",
         "category": "Authentication",
         "title": "Authentication disabled",
+        "default_severity_hint": "High",
         "severity": "High",
+        "confidence_weight": 0.9,
         "confidence": 0.9,
+        "references": [],
         "patterns": [r"\bauth\b\s*=\s*false", r"\bauthentication\b\s*=\s*off"],
     },
     {
         "rule_id": "B-002",
+        "name": "Anonymous access enabled",
         "category": "Authentication",
         "title": "Anonymous access enabled",
+        "default_severity_hint": "High",
         "severity": "High",
+        "confidence_weight": 0.9,
         "confidence": 0.9,
+        "references": [],
         "patterns": [r"anonymous\s*=\s*true", r"allow_anonymous"],
     },
     {
         "rule_id": "B-003",
+        "name": "Default credentials present",
         "category": "Authentication",
         "title": "Default credentials present",
+        "default_severity_hint": "High",
         "severity": "High",
+        "confidence_weight": 0.85,
         "confidence": 0.85,
+        "references": [],
         "patterns": [r"admin\s*:\s*admin", r"root\s*:\s*root"],
     },
 
@@ -119,26 +149,38 @@ RULES = [
 
     {
         "rule_id": "C-001",
+        "name": "World-writable permissions detected",
         "category": "Authorization",
         "title": "World-writable permissions detected",
+        "default_severity_hint": "High",
         "severity": "High",
+        "confidence_weight": 0.95,
         "confidence": 0.95,
+        "references": [],
         "patterns": [r"chmod\s+777", r"permissions\s*=\s*777"],
     },
     {
         "rule_id": "C-002",
+        "name": "Overly permissive access configuration",
         "category": "Authorization",
         "title": "Overly permissive access configuration",
+        "default_severity_hint": "High",
         "severity": "High",
+        "confidence_weight": 0.9,
         "confidence": 0.9,
+        "references": [],
         "patterns": [r"allow_all", r"public_access\s*=\s*true"],
     },
     {
         "rule_id": "C-003",
+        "name": "Open firewall or security group rule",
         "category": "Authorization",
         "title": "Open firewall or security group rule",
+        "default_severity_hint": "High",
         "severity": "High",
+        "confidence_weight": 0.95,
         "confidence": 0.95,
+        "references": [],
         "patterns": [r"0\.0\.0\.0/0"],
     },
 
@@ -148,18 +190,26 @@ RULES = [
 
     {
         "rule_id": "D-001",
+        "name": "Service bound to all interfaces",
         "category": "Network",
         "title": "Service bound to all interfaces",
+        "default_severity_hint": "Medium",
         "severity": "Medium",
+        "confidence_weight": 0.85,
         "confidence": 0.85,
+        "references": [],
         "patterns": [r"\b0\.0\.0\.0\b"],
     },
     {
         "rule_id": "D-002",
+        "name": "Exposed administrative or database port",
         "category": "Network",
         "title": "Exposed administrative or database port",
+        "default_severity_hint": "Medium",
         "severity": "Medium",
+        "confidence_weight": 0.8,
         "confidence": 0.8,
+        "references": [],
         "patterns": [r":22\b", r":3389\b", r":3306\b"],
     },
 
@@ -169,18 +219,26 @@ RULES = [
 
     {
         "rule_id": "E-001",
+        "name": "Insecure plaintext protocol detected",
         "category": "Transport",
         "title": "Insecure plaintext protocol detected",
+        "default_severity_hint": "High",
         "severity": "High",
+        "confidence_weight": 0.9,
         "confidence": 0.9,
+        "references": [],
         "patterns": [r"http://", r"ftp://", r"\btelnet\b"],
     },
     {
         "rule_id": "E-002",
+        "name": "TLS/SSL verification disabled",
         "category": "Transport",
         "title": "TLS/SSL verification disabled",
+        "default_severity_hint": "High",
         "severity": "High",
+        "confidence_weight": 0.95,
         "confidence": 0.95,
+        "references": [],
         "patterns": [r"ssl_verify\s*=\s*false", r"tls\s*=\s*false"],
     },
 
@@ -190,26 +248,38 @@ RULES = [
 
     {
         "rule_id": "F-001",
+        "name": "Weak hash algorithm detected",
         "category": "Crypto",
         "title": "Weak hash algorithm detected",
+        "default_severity_hint": "High",
         "severity": "High",
+        "confidence_weight": 0.85,
         "confidence": 0.85,
+        "references": [],
         "patterns": [r"\bmd5\b", r"\bsha1\b"],
     },
     {
         "rule_id": "F-002",
+        "name": "Weak encryption algorithm detected",
         "category": "Crypto",
         "title": "Weak encryption algorithm detected",
+        "default_severity_hint": "High",
         "severity": "High",
+        "confidence_weight": 0.9,
         "confidence": 0.9,
+        "references": [],
         "patterns": [r"\bdes\b", r"\brc4\b"],
     },
     {
         "rule_id": "F-003",
+        "name": "Weak cryptographic key size detected",
         "category": "Crypto",
         "title": "Weak cryptographic key size detected",
+        "default_severity_hint": "Medium",
         "severity": "Medium",
+        "confidence_weight": 0.85,
         "confidence": 0.85,
+        "references": [],
         "patterns": [r"rsa_1024", r"key_size\s*=\s*1024"],
     },
 
@@ -219,26 +289,38 @@ RULES = [
 
     {
         "rule_id": "G-001",
+        "name": "Debug mode enabled",
         "category": "Debug",
         "title": "Debug mode enabled",
+        "default_severity_hint": "Low",
         "severity": "Low",
+        "confidence_weight": 0.9,
         "confidence": 0.9,
+        "references": [],
         "patterns": [r"debug\s*=\s*true"],
     },
     {
         "rule_id": "G-002",
+        "name": "Verbose logging enabled",
         "category": "Debug",
         "title": "Verbose logging enabled",
+        "default_severity_hint": "Low",
         "severity": "Low",
+        "confidence_weight": 0.85,
         "confidence": 0.85,
+        "references": [],
         "patterns": [r"verbose\s*=\s*true"],
     },
     {
         "rule_id": "G-003",
+        "name": "Development or test environment indicator",
         "category": "Debug",
         "title": "Development or test environment indicator",
+        "default_severity_hint": "Low",
         "severity": "Low",
+        "confidence_weight": 0.8,
         "confidence": 0.8,
+        "references": [],
         "patterns": [r"env\s*=\s*dev", r"environment\s*=\s*test"],
     },
 
@@ -248,18 +330,26 @@ RULES = [
 
     {
         "rule_id": "H-001",
+        "name": "Audit logging disabled",
         "category": "Logging",
         "title": "Audit logging disabled",
+        "default_severity_hint": "Medium",
         "severity": "Medium",
+        "confidence_weight": 0.85,
         "confidence": 0.85,
+        "references": [],
         "patterns": [r"audit\s*=\s*false"],
     },
     {
         "rule_id": "H-002",
+        "name": "Security event logging disabled",
         "category": "Logging",
         "title": "Security event logging disabled",
+        "default_severity_hint": "Medium",
         "severity": "Medium",
+        "confidence_weight": 0.8,
         "confidence": 0.8,
+        "references": [],
         "patterns": [r"log_security\s*=\s*false"],
     },
 
@@ -269,18 +359,26 @@ RULES = [
 
     {
         "rule_id": "I-001",
+        "name": "SQL string concatenation detected",
         "category": "Injection",
         "title": "SQL string concatenation detected",
+        "default_severity_hint": "Medium",
         "severity": "Medium",
+        "confidence_weight": 0.6,
         "confidence": 0.6,
+        "references": [],
         "patterns": [r"select\s+.*\+"],
     },
     {
         "rule_id": "I-002",
+        "name": "Command execution primitive detected",
         "category": "Injection",
         "title": "Command execution primitive detected",
+        "default_severity_hint": "High",
         "severity": "High",
+        "confidence_weight": 0.7,
         "confidence": 0.7,
+        "references": [],
         "patterns": [r"os\.system\(", r"\beval\(", r"\bexec\("],
     },
 
@@ -290,18 +388,26 @@ RULES = [
 
     {
         "rule_id": "J-001",
+        "name": "Unsafe temporary directory usage",
         "category": "Filesystem",
         "title": "Unsafe temporary directory usage",
+        "default_severity_hint": "Medium",
         "severity": "Medium",
+        "confidence_weight": 0.75,
         "confidence": 0.75,
+        "references": [],
         "patterns": [r"/tmp", r"temp/"],
     },
     {
         "rule_id": "J-002",
+        "name": "Unvalidated upload directory configuration",
         "category": "Filesystem",
         "title": "Unvalidated upload directory configuration",
+        "default_severity_hint": "Medium",
         "severity": "Medium",
+        "confidence_weight": 0.8,
         "confidence": 0.8,
+        "references": [],
         "patterns": [r"upload_dir\s*="],
     },
 
@@ -311,10 +417,14 @@ RULES = [
 
     {
         "rule_id": "K-001",
+        "name": "End-of-life platform or library detected",
         "category": "Dependency",
         "title": "End-of-life platform or library detected",
+        "default_severity_hint": "Medium",
         "severity": "Medium",
+        "confidence_weight": 0.9,
         "confidence": 0.9,
+        "references": [],
         "patterns": [r"python\s+2\.7", r"openssl\s+1\.0"],
     },
 
@@ -324,18 +434,26 @@ RULES = [
 
     {
         "rule_id": "L-001",
+        "name": "TODO or FIXME marker in production files",
         "category": "Hygiene",
         "title": "TODO or FIXME marker in production files",
+        "default_severity_hint": "Low",
         "severity": "Low",
+        "confidence_weight": 0.8,
         "confidence": 0.8,
+        "references": [],
         "patterns": [r"\btodo\b", r"\bfixme\b"],
     },
     {
         "rule_id": "L-002",
+        "name": "Example or sample configuration reference",
         "category": "Hygiene",
         "title": "Example or sample configuration reference",
+        "default_severity_hint": "Low",
         "severity": "Low",
+        "confidence_weight": 0.75,
         "confidence": 0.75,
+        "references": [],
         "patterns": [r"example_config", r"sample\.conf"],
     },
 ]
@@ -346,7 +464,18 @@ RULES = [
 # ============================================================
 
 def run_rules(chunks: list[dict]) -> list[dict]:
+    """
+    Run all rules against ingested document chunks.
+    Returns findings with complete rule metadata.
+    """
     findings: list[dict] = []
+
+    # Validate all rules have required metadata (structural check only)
+    for rule in RULES:
+        if not validate_rule_metadata(rule):
+            raise ValueError(
+                f"Rule {rule.get('rule_id', 'UNKNOWN')} is missing required metadata fields"
+            )
 
     for chunk in chunks:
         content = chunk["content"].lower()
@@ -356,18 +485,27 @@ def run_rules(chunks: list[dict]) -> list[dict]:
                 if re.search(pattern, content):
                     suppressed = is_suppressed(content)
 
-                    findings.append({
+                    # Include all required rule metadata in finding
+                    finding = {
                         "finding_id": str(uuid.uuid4()),
+                        # Rule metadata (required fields)
                         "rule_id": rule["rule_id"],
+                        "name": rule["name"],
                         "category": rule["category"],
+                        "default_severity_hint": rule["default_severity_hint"],
+                        "confidence_weight": rule["confidence_weight"],
+                        "references": rule["references"],
+                        # Backward compatibility fields (for UI)
                         "title": rule["title"],
                         "severity_suggested": rule["severity"],
                         "confidence": rule["confidence"],
+                        # Suppression metadata
                         "suppressed": suppressed,
                         "suppression_reason": (
                             "Matched suppression pattern"
                             if suppressed else None
                         ),
+                        # Evidence
                         "evidence": {
                             "source_file": chunk["source_file"],
                             "chunk_id": chunk["chunk_id"],
@@ -375,7 +513,8 @@ def run_rules(chunks: list[dict]) -> list[dict]:
                             "line_end": chunk["line_end"],
                             "excerpt": chunk["content"][:300],
                         },
-                    })
+                    }
+                    findings.append(finding)
                     break
 
     return findings
