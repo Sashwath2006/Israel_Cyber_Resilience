@@ -201,17 +201,21 @@ class MainWindow(QMainWindow):
         suppressed = [r for r in results if r["suppressed"]]
 
         for r in active:
+            # Evidence is now a list (Phase 8.2 normalized schema)
+            evidence_file = r["evidence"][0]["file"] if r["evidence"] else "unknown"
             self.findings_view.appendPlainText(
                 f"[{r['rule_id']}] {r['title']}\n"
                 f"Severity: {r['severity_suggested']} | "
-                f"Source: {r['evidence']['source_file']}\n"
+                f"Source: {evidence_file}\n"
                 "----"
             )
 
         for r in suppressed:
+            # Evidence is now a list (Phase 8.2 normalized schema)
+            evidence_file = r["evidence"][0]["file"] if r["evidence"] else "unknown"
             self.suppressed_view.appendPlainText(
                 f"[{r['rule_id']}] {r['title']} (SUPPRESSED)\n"
-                f"Source: {r['evidence']['source_file']}\n"
+                f"Source: {evidence_file}\n"
                 "----"
             )
 
