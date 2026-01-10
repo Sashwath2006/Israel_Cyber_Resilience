@@ -1,10 +1,12 @@
 """
 Rule Metadata Definitions (Phase 8.1)
 Evidence Normalization (Phase 8.2)
+Deterministic Confidence Scoring (Phase 8.3)
 
 Structural metadata definitions for rule taxonomy.
 Normalized evidence schema for consistent finding evidence.
-No detection logic, confidence formulas, or suppression logic.
+Deterministic confidence calculation in rules/confidence.py.
+No detection logic or suppression logic.
 """
 
 from typing import TypedDict, Literal

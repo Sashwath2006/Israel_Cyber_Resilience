@@ -6,6 +6,12 @@ from rules.metadata import (
     normalize_evidence,
     validate_evidence_list,
 )
+from rules.confidence import (
+    calculate_confidence,
+    assess_evidence_completeness,
+    validate_confidence_weight,
+    validate_confidence_score,
+)
 
 # ============================================================
 # FALSE POSITIVE SUPPRESSION (DETERMINISTIC & AUDITABLE)
@@ -470,10 +476,14 @@ RULES = [
 def run_rules(chunks: list[dict]) -> list[dict]:
     """
     Run all rules against ingested document chunks.
-    Returns findings with complete rule metadata and normalized evidence.
+    Returns findings with complete rule metadata, normalized evidence,
+    and deterministic confidence scores.
     
     Evidence is structured as a list of normalized evidence entries,
     allowing multiple evidence entries per finding (Phase 8.2).
+    
+    Confidence scores are computed deterministically from rule metadata
+    and evidence characteristics (Phase 8.3).
     """
     findings: list[dict] = []
 
@@ -482,6 +492,12 @@ def run_rules(chunks: list[dict]) -> list[dict]:
         if not validate_rule_metadata(rule):
             raise ValueError(
                 f"Rule {rule.get('rule_id', 'UNKNOWN')} is missing required metadata fields"
+            )
+        
+        # Validate confidence_weight is present and valid (Phase 8.3)
+        if not validate_confidence_weight(rule.get("confidence_weight")):
+            raise ValueError(
+                f"Rule {rule.get('rule_id', 'UNKNOWN')} has invalid or missing confidence_weight"
             )
 
     for chunk in chunks:
@@ -517,6 +533,28 @@ def run_rules(chunks: list[dict]) -> list[dict]:
                             f"Normalized evidence failed validation for chunk {chunk.get('chunk_id', 'UNKNOWN')}"
                         )
 
+                    # Calculate deterministic confidence score (Phase 8.3)
+                    try:
+                        # Assess evidence completeness
+                        evidence_completeness = assess_evidence_completeness(evidence_list)
+                        
+                        # Calculate confidence from rule weight, evidence count, and completeness
+                        confidence_score = calculate_confidence(
+                            confidence_weight=rule["confidence_weight"],
+                            evidence_count=len(evidence_list),
+                            evidence_completeness=evidence_completeness,
+                        )
+                    except ValueError as e:
+                        raise ValueError(
+                            f"Failed to calculate confidence for rule {rule['rule_id']}: {e}"
+                        )
+                    
+                    # Validate computed confidence score
+                    if not validate_confidence_score(confidence_score):
+                        raise ValueError(
+                            f"Computed confidence score {confidence_score} is out of valid range [0.0, 1.0]"
+                        )
+
                     # Include all required rule metadata in finding
                     finding = {
                         "finding_id": str(uuid.uuid4()),
@@ -527,10 +565,12 @@ def run_rules(chunks: list[dict]) -> list[dict]:
                         "default_severity_hint": rule["default_severity_hint"],
                         "confidence_weight": rule["confidence_weight"],
                         "references": rule["references"],
+                        # Deterministic confidence score (Phase 8.3)
+                        "confidence_score": confidence_score,
                         # Backward compatibility fields (for UI)
                         "title": rule["title"],
                         "severity_suggested": rule["severity"],
-                        "confidence": rule["confidence"],
+                        "confidence": rule["confidence"],  # Legacy field for backward compatibility
                         # Suppression metadata
                         "suppressed": suppressed,
                         "suppression_reason": (
