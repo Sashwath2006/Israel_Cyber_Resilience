@@ -11,7 +11,7 @@ File-type applicability constraints for rule precision.
 No detection logic or suppression logic.
 """
 
-from typing import TypedDict, Literal
+from typing import TypedDict, Literal, Optional
 from datetime import datetime
 
 
@@ -37,7 +37,7 @@ FORMAT_TO_FILE_TYPE = {
 }
 
 
-def normalize_file_type(chunk_format: str | None) -> str:
+def normalize_file_type(chunk_format: Optional[str]) -> str:
     """
     Normalize chunk format to standard file type.
     
@@ -131,7 +131,7 @@ class EvidenceLocation(TypedDict):
     """
     type: Literal["line", "row", "range"]
     start: int
-    end: int | None
+    end: Optional[int]
 
 
 class Evidence(TypedDict):
@@ -143,7 +143,7 @@ class Evidence(TypedDict):
     file: str
     location: EvidenceLocation
     snippet: str
-    timestamp: str | None
+    timestamp: Optional[str]
 
 
 # ============================================================
@@ -225,11 +225,11 @@ def validate_evidence_list(evidence_list: list) -> bool:
 
 def normalize_evidence(
     source_file: str,
-    line_start: int | None,
-    line_end: int | None,
+    line_start: Optional[int],
+    line_end: Optional[int],
     content: str,
     format_type: str = "text",
-    timestamp: str | None = None,
+    timestamp: Optional[str] = None,
     max_snippet_length: int = 500,
 ) -> Evidence:
     """

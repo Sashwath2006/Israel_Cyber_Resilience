@@ -5,6 +5,7 @@ Phase 8.1: Rule taxonomy and metadata foundation.
 Phase 8.2: Evidence normalization.
 Phase 8.3: Deterministic confidence scoring.
 Phase 8.4: File-type-specific rule sets.
+Phase 8.5: Rule suppression and false-positive handling.
 """
 
 from rules.metadata import (
@@ -25,6 +26,13 @@ from rules.confidence import (
     validate_confidence_weight,
     validate_confidence_score,
 )
+from rules.suppression import (
+    create_suppression_metadata,
+    suppress_finding,
+    unsuppress_finding,
+    filter_findings,
+    validate_suppression_metadata,
+)
 
 __all__ = [
     "RuleMetadata",
@@ -41,4 +49,9 @@ __all__ = [
     "SUPPORTED_FILE_TYPES",
     "FORMAT_TO_FILE_TYPE",
     "normalize_file_type",
+    "create_suppression_metadata",
+    "suppress_finding",
+    "unsuppress_finding",
+    "filter_findings",
+    "validate_suppression_metadata",
 ]

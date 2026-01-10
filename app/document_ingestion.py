@@ -2,6 +2,7 @@ import json
 import csv
 import uuid
 from pathlib import Path
+from typing import Optional
 
 
 def ingest_file(file_path: str) -> list[dict]:
@@ -106,8 +107,8 @@ def _ingest_json(path: Path) -> list[dict]:
 def _make_chunk(
     filename: str,
     content: str,
-    start: int | None,
-    end: int | None,
+    start: Optional[int],
+    end: Optional[int],
     fmt: str,
 ) -> dict:
     return {

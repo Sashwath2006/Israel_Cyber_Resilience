@@ -14,6 +14,10 @@ from rules.confidence import (
     validate_confidence_weight,
     validate_confidence_score,
 )
+from rules.suppression import (
+    create_suppression_metadata,
+    validate_suppression_metadata,
+)
 
 # All file types for rules that should apply to all supported types (Phase 8.4)
 ALL_FILE_TYPES = SUPPORTED_FILE_TYPES  # {"log", "csv", "json", "text"}
@@ -521,6 +525,10 @@ def run_rules(chunks: list[dict]) -> list[dict]:
     
     Rules are gated by file type applicability - only rules declared
     applicable to a chunk's file type are executed (Phase 8.4).
+    
+    All findings are generated. Pattern-based suppression is applied
+    as system-level suppression metadata (Phase 8.5). Suppression does
+    not affect detection, evidence, or confidence calculation.
     """
     findings: list[dict] = []
 
@@ -550,7 +558,9 @@ def run_rules(chunks: list[dict]) -> list[dict]:
             
             for pattern in rule["patterns"]:
                 if re.search(pattern, content):
-                    suppressed = is_suppressed(content)
+                    # Detection always runs - all findings are generated
+                    # Pattern-based suppression is applied AFTER detection (Phase 8.5)
+                    pattern_suppressed = is_suppressed(content)
 
                     # Normalize evidence to Phase 8.2 schema
                     try:
@@ -578,6 +588,7 @@ def run_rules(chunks: list[dict]) -> list[dict]:
                         )
 
                     # Calculate deterministic confidence score (Phase 8.3)
+                    # Suppression does NOT affect confidence calculation
                     try:
                         # Assess evidence completeness
                         evidence_completeness = assess_evidence_completeness(evidence_list)
@@ -599,6 +610,18 @@ def run_rules(chunks: list[dict]) -> list[dict]:
                             f"Computed confidence score {confidence_score} is out of valid range [0.0, 1.0]"
                         )
 
+                    # Create suppression metadata (Phase 8.5)
+                    # Pattern-based suppression uses "system" as suppressed_by
+                    suppression_metadata = create_suppression_metadata(
+                        suppressed=pattern_suppressed,
+                        suppression_reason=(
+                            "Matched suppression pattern"
+                            if pattern_suppressed else None
+                        ),
+                        suppressed_by="system" if pattern_suppressed else None,
+                        suppressed_at=None,  # Auto-generated
+                    )
+
                     # Include all required rule metadata in finding
                     finding = {
                         "finding_id": str(uuid.uuid4()),
@@ -615,13 +638,9 @@ def run_rules(chunks: list[dict]) -> list[dict]:
                         "title": rule["title"],
                         "severity_suggested": rule["severity"],
                         "confidence": rule["confidence"],  # Legacy field for backward compatibility
-                        # Suppression metadata
-                        "suppressed": suppressed,
-                        "suppression_reason": (
-                            "Matched suppression pattern"
-                            if suppressed else None
-                        ),
-                        # Normalized evidence (Phase 8.2 - list format)
+                        # Suppression metadata (Phase 8.5 - explicit, reversible, auditable)
+                        **suppression_metadata,
+                        # Normalized evidence (Phase 8.2 - list format, unchanged by suppression)
                         "evidence": evidence_list,
                     }
 
@@ -630,9 +649,42 @@ def run_rules(chunks: list[dict]) -> list[dict]:
                         raise ValueError(
                             f"Finding {finding['finding_id']} has empty evidence list"
                         )
+                    
+                    # Validate suppression metadata structure
+                    if not validate_suppression_metadata(finding):
+                        raise ValueError(
+                            f"Finding {finding['finding_id']} has invalid suppression metadata"
+                        )
 
                     findings.append(finding)
                     break
 
     return findings
+
+
+def run_rules_filtered(
+    chunks: list[dict],
+    include_suppressed: bool = False,
+) -> list[dict]:
+    """
+    Run all rules and return filtered findings (Phase 8.5).
+    
+    This is a convenience wrapper around run_rules() that applies
+    suppression filtering. By default, suppressed findings are excluded.
+    
+    Args:
+        chunks: List of document chunks to analyze
+        include_suppressed: If True, include suppressed findings; if False, exclude them (default)
+    
+    Returns:
+        Filtered list of findings
+    
+    Note:
+        All findings are generated (detection always runs). Filtering is
+        applied after detection. Evidence remains unchanged.
+    """
+    from rules.suppression import filter_findings
+    
+    all_findings = run_rules(chunks)
+    return filter_findings(all_findings, include_suppressed=include_suppressed)
 
