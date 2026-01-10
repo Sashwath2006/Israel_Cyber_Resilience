@@ -2,15 +2,62 @@
 Rule Metadata Definitions (Phase 8.1)
 Evidence Normalization (Phase 8.2)
 Deterministic Confidence Scoring (Phase 8.3)
+File-Type-Specific Rule Sets (Phase 8.4)
 
 Structural metadata definitions for rule taxonomy.
 Normalized evidence schema for consistent finding evidence.
 Deterministic confidence calculation in rules/confidence.py.
+File-type applicability constraints for rule precision.
 No detection logic or suppression logic.
 """
 
 from typing import TypedDict, Literal
 from datetime import datetime
+
+
+# ============================================================
+# FILE TYPE CONSTANTS (Phase 8.4)
+# ============================================================
+
+# Supported file types (small, explicit enum - extendable later)
+SUPPORTED_FILE_TYPES = {"log", "csv", "json", "text"}
+
+# Mapping from chunk format to normalized file type
+# txt, log, conf, config → "text"
+# csv → "csv"
+# json → "json"
+# Unknown → "text" (safe default)
+FORMAT_TO_FILE_TYPE = {
+    "txt": "text",
+    "log": "text",
+    "conf": "text",
+    "config": "text",
+    "csv": "csv",
+    "json": "json",
+}
+
+
+def normalize_file_type(chunk_format: str | None) -> str:
+    """
+    Normalize chunk format to standard file type.
+    
+    Maps ingestion format strings to normalized file types:
+    - txt, log, conf, config → "text"
+    - csv → "csv"
+    - json → "json"
+    - None or unknown → "text" (safe default)
+    
+    Args:
+        chunk_format: Format string from chunk (e.g., "txt", "log", "csv", "json")
+    
+    Returns:
+        Normalized file type string: "log", "csv", "json", or "text"
+    """
+    if chunk_format is None:
+        return "text"
+    
+    normalized = chunk_format.lower().strip()
+    return FORMAT_TO_FILE_TYPE.get(normalized, "text")
 
 
 # ============================================================
@@ -28,6 +75,7 @@ class RuleMetadata(TypedDict):
     default_severity_hint: Literal["Low", "Medium", "High", "Critical"]
     confidence_weight: float
     references: list[str]
+    applicable_file_types: set[str]  # Phase 8.4: file types this rule applies to
 
 
 # ============================================================
@@ -41,6 +89,8 @@ def validate_rule_metadata(rule: dict) -> bool:
     
     This is structural validation only. Does not validate detection patterns
     or modify rule behavior.
+    
+    Phase 8.4: Also validates applicable_file_types is present and valid.
     """
     required_fields = {
         "rule_id",
@@ -49,9 +99,26 @@ def validate_rule_metadata(rule: dict) -> bool:
         "default_severity_hint",
         "confidence_weight",
         "references",
+        "applicable_file_types",  # Phase 8.4: required field
     }
     
-    return all(field in rule for field in required_fields)
+    if not all(field in rule for field in required_fields):
+        return False
+    
+    # Validate applicable_file_types is a set and contains only supported types
+    applicable = rule.get("applicable_file_types")
+    if not isinstance(applicable, (set, list, tuple)):
+        return False
+    
+    applicable_set = set(applicable)
+    if not applicable_set:
+        return False  # Must declare at least one applicable file type
+    
+    # All declared types must be in supported set
+    if not applicable_set.issubset(SUPPORTED_FILE_TYPES):
+        return False
+    
+    return True
 
 
 # ============================================================

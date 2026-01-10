@@ -5,6 +5,8 @@ from rules.metadata import (
     validate_rule_metadata,
     normalize_evidence,
     validate_evidence_list,
+    normalize_file_type,
+    SUPPORTED_FILE_TYPES,
 )
 from rules.confidence import (
     calculate_confidence,
@@ -12,6 +14,9 @@ from rules.confidence import (
     validate_confidence_weight,
     validate_confidence_score,
 )
+
+# All file types for rules that should apply to all supported types (Phase 8.4)
+ALL_FILE_TYPES = SUPPORTED_FILE_TYPES  # {"log", "csv", "json", "text"}
 
 # ============================================================
 # FALSE POSITIVE SUPPRESSION (DETERMINISTIC & AUDITABLE)
@@ -67,6 +72,7 @@ RULES = [
         "confidence_weight": 0.95,
         "confidence": 0.95,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [r"\bpassword\b\s*=", r"\bpwd\b\s*="],
     },
     {
@@ -79,6 +85,7 @@ RULES = [
         "confidence_weight": 0.95,
         "confidence": 0.95,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [r"\bapi[_-]?key\b\s*=", r"\btoken\b\s*="],
     },
     {
@@ -91,6 +98,7 @@ RULES = [
         "confidence_weight": 1.0,
         "confidence": 1.0,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [
             r"-----begin private key-----",
             r"-----begin rsa private key-----",
@@ -106,6 +114,7 @@ RULES = [
         "confidence_weight": 0.98,
         "confidence": 0.98,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [
             r"akia[0-9a-z]{16}",      # AWS
             r"accountkey\s*=",        # Azure
@@ -126,6 +135,7 @@ RULES = [
         "confidence_weight": 0.9,
         "confidence": 0.9,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [r"\bauth\b\s*=\s*false", r"\bauthentication\b\s*=\s*off"],
     },
     {
@@ -138,6 +148,7 @@ RULES = [
         "confidence_weight": 0.9,
         "confidence": 0.9,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [r"anonymous\s*=\s*true", r"allow_anonymous"],
     },
     {
@@ -150,6 +161,7 @@ RULES = [
         "confidence_weight": 0.85,
         "confidence": 0.85,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [r"admin\s*:\s*admin", r"root\s*:\s*root"],
     },
 
@@ -167,6 +179,7 @@ RULES = [
         "confidence_weight": 0.95,
         "confidence": 0.95,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [r"chmod\s+777", r"permissions\s*=\s*777"],
     },
     {
@@ -179,6 +192,7 @@ RULES = [
         "confidence_weight": 0.9,
         "confidence": 0.9,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [r"allow_all", r"public_access\s*=\s*true"],
     },
     {
@@ -191,6 +205,7 @@ RULES = [
         "confidence_weight": 0.95,
         "confidence": 0.95,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [r"0\.0\.0\.0/0"],
     },
 
@@ -208,6 +223,7 @@ RULES = [
         "confidence_weight": 0.85,
         "confidence": 0.85,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [r"\b0\.0\.0\.0\b"],
     },
     {
@@ -220,6 +236,7 @@ RULES = [
         "confidence_weight": 0.8,
         "confidence": 0.8,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [r":22\b", r":3389\b", r":3306\b"],
     },
 
@@ -237,6 +254,7 @@ RULES = [
         "confidence_weight": 0.9,
         "confidence": 0.9,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [r"http://", r"ftp://", r"\btelnet\b"],
     },
     {
@@ -249,6 +267,7 @@ RULES = [
         "confidence_weight": 0.95,
         "confidence": 0.95,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [r"ssl_verify\s*=\s*false", r"tls\s*=\s*false"],
     },
 
@@ -266,6 +285,7 @@ RULES = [
         "confidence_weight": 0.85,
         "confidence": 0.85,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [r"\bmd5\b", r"\bsha1\b"],
     },
     {
@@ -278,6 +298,7 @@ RULES = [
         "confidence_weight": 0.9,
         "confidence": 0.9,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [r"\bdes\b", r"\brc4\b"],
     },
     {
@@ -290,6 +311,7 @@ RULES = [
         "confidence_weight": 0.85,
         "confidence": 0.85,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [r"rsa_1024", r"key_size\s*=\s*1024"],
     },
 
@@ -307,6 +329,7 @@ RULES = [
         "confidence_weight": 0.9,
         "confidence": 0.9,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [r"debug\s*=\s*true"],
     },
     {
@@ -319,6 +342,7 @@ RULES = [
         "confidence_weight": 0.85,
         "confidence": 0.85,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [r"verbose\s*=\s*true"],
     },
     {
@@ -331,6 +355,7 @@ RULES = [
         "confidence_weight": 0.8,
         "confidence": 0.8,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [r"env\s*=\s*dev", r"environment\s*=\s*test"],
     },
 
@@ -348,6 +373,7 @@ RULES = [
         "confidence_weight": 0.85,
         "confidence": 0.85,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [r"audit\s*=\s*false"],
     },
     {
@@ -360,6 +386,7 @@ RULES = [
         "confidence_weight": 0.8,
         "confidence": 0.8,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [r"log_security\s*=\s*false"],
     },
 
@@ -377,6 +404,7 @@ RULES = [
         "confidence_weight": 0.6,
         "confidence": 0.6,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [r"select\s+.*\+"],
     },
     {
@@ -389,6 +417,7 @@ RULES = [
         "confidence_weight": 0.7,
         "confidence": 0.7,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [r"os\.system\(", r"\beval\(", r"\bexec\("],
     },
 
@@ -406,6 +435,7 @@ RULES = [
         "confidence_weight": 0.75,
         "confidence": 0.75,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [r"/tmp", r"temp/"],
     },
     {
@@ -418,6 +448,7 @@ RULES = [
         "confidence_weight": 0.8,
         "confidence": 0.8,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [r"upload_dir\s*="],
     },
 
@@ -435,6 +466,7 @@ RULES = [
         "confidence_weight": 0.9,
         "confidence": 0.9,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [r"python\s+2\.7", r"openssl\s+1\.0"],
     },
 
@@ -452,6 +484,7 @@ RULES = [
         "confidence_weight": 0.8,
         "confidence": 0.8,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [r"\btodo\b", r"\bfixme\b"],
     },
     {
@@ -464,6 +497,7 @@ RULES = [
         "confidence_weight": 0.75,
         "confidence": 0.75,
         "references": [],
+        "applicable_file_types": ALL_FILE_TYPES,
         "patterns": [r"example_config", r"sample\.conf"],
     },
 ]
@@ -484,6 +518,9 @@ def run_rules(chunks: list[dict]) -> list[dict]:
     
     Confidence scores are computed deterministically from rule metadata
     and evidence characteristics (Phase 8.3).
+    
+    Rules are gated by file type applicability - only rules declared
+    applicable to a chunk's file type are executed (Phase 8.4).
     """
     findings: list[dict] = []
 
@@ -502,8 +539,15 @@ def run_rules(chunks: list[dict]) -> list[dict]:
 
     for chunk in chunks:
         content = chunk["content"].lower()
+        
+        # Normalize file type from chunk format (Phase 8.4)
+        chunk_file_type = normalize_file_type(chunk.get("format"))
 
         for rule in RULES:
+            # Gate rule execution based on file type applicability (Phase 8.4)
+            if chunk_file_type not in rule.get("applicable_file_types", set()):
+                continue  # Skip silently when rule is not applicable to this file type
+            
             for pattern in rule["patterns"]:
                 if re.search(pattern, content):
                     suppressed = is_suppressed(content)
