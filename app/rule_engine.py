@@ -44,14 +44,19 @@ SUPPRESSION_PATTERNS = [
     r"not_used",
 ]
 
+# Precompile suppression patterns for performance (Phase 8.6)
+SUPPRESSION_PATTERNS_COMPILED = [re.compile(pattern, re.IGNORECASE) for pattern in SUPPRESSION_PATTERNS]
+
 
 def is_suppressed(content: str) -> bool:
     """
     Returns True if the content matches any explicit
     false-positive suppression pattern.
+    
+    Uses precompiled patterns for performance (Phase 8.6).
     """
-    for pattern in SUPPRESSION_PATTERNS:
-        if re.search(pattern, content):
+    for compiled_pattern in SUPPRESSION_PATTERNS_COMPILED:
+        if compiled_pattern.search(content):
             return True
     return False
 
@@ -508,6 +513,31 @@ RULES = [
 
 
 # ============================================================
+# REGEX PRECOMPILATION (Phase 8.6 - Performance Optimization)
+# ============================================================
+
+def _precompile_rule_patterns(rules: list[dict]) -> None:
+    """
+    Precompile regex patterns for all rules at module load time.
+    Adds 'compiled_patterns' field to each rule for performance.
+    
+    This optimization reduces regex compilation overhead during rule execution.
+    Patterns are compiled once and reused for all chunks.
+    """
+    for rule in rules:
+        patterns = rule.get("patterns", [])
+        # Precompile patterns with re.IGNORECASE (since content is lowercased)
+        # Note: content.lower() is still called, but compiled patterns are faster
+        rule["compiled_patterns"] = [
+            re.compile(pattern, re.IGNORECASE) for pattern in patterns
+        ]
+
+
+# Precompile all rule patterns at module load time
+_precompile_rule_patterns(RULES)
+
+
+# ============================================================
 # RULE EXECUTION ENGINE (DETERMINISTIC)
 # ============================================================
 
@@ -529,6 +559,11 @@ def run_rules(chunks: list[dict]) -> list[dict]:
     All findings are generated. Pattern-based suppression is applied
     as system-level suppression metadata (Phase 8.5). Suppression does
     not affect detection, evidence, or confidence calculation.
+    
+    Performance optimizations (Phase 8.6):
+    - Regex patterns are precompiled at module load time
+    - Suppression patterns are precompiled
+    - Compiled patterns are reused for all chunks
     """
     findings: list[dict] = []
 
@@ -556,8 +591,10 @@ def run_rules(chunks: list[dict]) -> list[dict]:
             if chunk_file_type not in rule.get("applicable_file_types", set()):
                 continue  # Skip silently when rule is not applicable to this file type
             
-            for pattern in rule["patterns"]:
-                if re.search(pattern, content):
+            # Use precompiled patterns for performance (Phase 8.6)
+            compiled_patterns = rule.get("compiled_patterns", [])
+            for compiled_pattern in compiled_patterns:
+                if compiled_pattern.search(content):
                     # Detection always runs - all findings are generated
                     # Pattern-based suppression is applied AFTER detection (Phase 8.5)
                     pattern_suppressed = is_suppressed(content)
