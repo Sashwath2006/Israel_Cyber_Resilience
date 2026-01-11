@@ -1,0 +1,6 @@
+2024-01-15 10:30:45 INFO Application started
+2024-01-15 10:30:46 DEBUG debug=true
+2024-01-15 10:30:47 WARN password=secret123
+2024-01-15 10:30:48 ERROR auth=false
+2024-01-15 10:30:49 INFO TODO: Fix this later
+2024-01-15 10:30:50 DEBUG verbose=true

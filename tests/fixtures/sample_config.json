@@ -1,0 +1,14 @@
+{
+  "database": {
+    "host": "localhost",
+    "port": 3306,
+    "password": "admin123"
+  },
+  "security": {
+    "ssl_verify": false,
+    "api_key": "sk-1234567890abcdef"
+  },
+  "logging": {
+    "audit": false
+  }
+}

@@ -1,0 +1,7 @@
+# Application Configuration
+database_host=localhost
+database_port=3306
+api_key=sk-abcdef123456
+ssl_verify=false
+auth=true
+anonymous=false
