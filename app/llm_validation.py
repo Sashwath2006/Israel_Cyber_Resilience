@@ -1,9 +1,12 @@
 """
-LLM Output Validation (Phase 9)
+LLM Output Validation (Phase 9, Phase 10)
 
 Validates LLM reasoning outputs to prevent hallucinations and ensure
 compliance with safety constraints. All outputs must be grounded in
 provided findings only.
+
+Phase 10: Enforces analyst authority by preventing LLM from setting
+final_severity or any severity override fields.
 """
 
 from typing import Any
@@ -22,6 +25,7 @@ def validate_llm_reasoning_output(
     - Reference unknown files
     - Claim certainty
     - Fail schema validation
+    - Attempt to set final_severity (Phase 10: analyst authority only)
     
     Args:
         output: LLM output dictionary to validate
@@ -117,6 +121,22 @@ def validate_llm_reasoning_output(
     # Check for file references that don't match evidence
     # (Basic check - more sophisticated parsing could be added)
     # This is a soft check since file names might appear in general descriptions
+    
+    # Phase 10: Reject any attempt by LLM to set final_severity
+    # Only analyst can override severity - LLM must only suggest
+    if "final_severity" in output:
+        return False, (
+            "LLM output cannot contain final_severity. "
+            "Only suggested_severity is allowed. "
+            "Final severity is set by analyst only."
+        )
+    
+    # Phase 10: Reject severity_override fields - LLM cannot override
+    if "severity_overridden" in output or "severity_override_reason" in output:
+        return False, (
+            "LLM output cannot contain severity override fields. "
+            "These are managed by analyst only."
+        )
     
     return True, ""
 

@@ -1,9 +1,12 @@
 """
-Context Builder for LLM-Assisted Reasoning (Phase 9)
+Context Builder for LLM-Assisted Reasoning (Phase 9, Phase 10)
 
 Builds grounded, restrictive prompts that ensure LLM only reasons
 over provided findings without inventing vulnerabilities or accessing
 raw documents.
+
+Phase 10: Explicitly prevents LLM from setting final_severity or
+any severity override fields - analyst authority only.
 """
 
 
@@ -30,7 +33,9 @@ def build_context(findings: list[dict], task: str) -> str:
         "- You do NOT discover vulnerabilities\n"
         "- You do NOT parse raw documents\n"
         "- You do NOT mark findings as 'confirmed'\n"
+        "- You do NOT claim certainty\n"
         "- You do NOT assign final severity (only suggest)\n"
+        "- You do NOT set final_severity or severity_override fields (Phase 10: analyst authority only)\n"
         "- You ONLY reason over the findings provided below\n"
         "- All outputs are SUGGESTED/ADVISORY ONLY\n"
         "- If uncertain, explicitly state uncertainty\n"
