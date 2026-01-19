@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QProgressBar,
     QScrollArea,
+    QSizePolicy,
 )
 from PySide6.QtGui import QIcon
 from PySide6.QtCore import Qt
@@ -705,13 +706,16 @@ class MainWindow(QMainWindow):
         page = QWidget()
         page.setStyleSheet("background-color: rgb(0, 0, 0);")
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(24, 12, 24, 24)  # Reduced margins: top 20→12, sides 32→24
-        layout.setSpacing(8)  # Reduced from 12 - pull content up
+        layout.setContentsMargins(24, 4, 24, 24)  # Minimize top margin to pull content up
+        layout.setSpacing(0)  # No extra vertical spacing between header and content (toolbar-like)
         
         # Header - bold, red
         header = self._create_section_header("REVIEW & EDIT")
-        layout.addWidget(header)
-        layout.addSpacing(4)  # Reduced from 8 - minimize gap between header and content
+        header.setStyleSheet("color: rgb(200, 0, 0); padding: 2px 0px; margin: 0px;")  # Minimal padding for toolbar-like height
+        header.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)  # Prevent vertical expansion
+        header.setMinimumHeight(header.sizeHint().height())
+        header.setMaximumHeight(header.sizeHint().height())  # Fixed/minimal height: never expands vertically
+        layout.addWidget(header, 0)
         
         # Main container for preview and chat (with splitter)
         self.page_4_container = QWidget()
@@ -815,7 +819,7 @@ class MainWindow(QMainWindow):
         self.page_4_splitter.setStretchFactor(1, 1)  # Increased from 0 - assistant console gets proper weight
         
         container_layout.addWidget(self.page_4_splitter)
-        layout.addWidget(self.page_4_container)
+        layout.addWidget(self.page_4_container, 1)  # Ensure content takes remaining vertical space
         
         return page
 
