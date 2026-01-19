@@ -31,9 +31,12 @@ def build_context(findings: list[dict], task: str) -> str:
         "\n"
         "CRITICAL CONSTRAINTS:\n"
         "- You do NOT discover vulnerabilities\n"
+        "- You do NOT invent vulnerabilities\n"
         "- You do NOT parse raw documents\n"
         "- You do NOT mark findings as 'confirmed'\n"
+        "- You do NOT assume certainty\n"
         "- You do NOT claim certainty\n"
+        "- You do NOT reference data not provided\n"
         "- You do NOT assign final severity (only suggest)\n"
         "- You do NOT set final_severity or severity_override fields (Phase 10: analyst authority only)\n"
         "- You ONLY reason over the findings provided below\n"
@@ -65,19 +68,26 @@ def build_context(findings: list[dict], task: str) -> str:
         # Include confidence_score for context (Phase 9)
         confidence_score = f.get("confidence_score", 0.0)
         
+        # Phase 9: Include only required fields - rule_id, category, description,
+        # evidence summary, confidence score, source file(s)
+        # Note: "description" is mapped from "title" field
+        description = f.get("title", f.get("name", ""))
+        
+        # Build evidence summary (truncated snippet)
+        evidence_summary = primary_evidence.get("snippet", "")[:200] + ("..." if len(primary_evidence.get("snippet", "")) > 200 else "")
+        
+        # Collect all source files from evidence
+        source_files = [evidence.get("file", "") for evidence in evidence_list if evidence.get("file")]
+        source_files_str = ", ".join(set(source_files))  # Deduplicate
+        
         body.append(
             f"\nFINDING ID: {f['finding_id']}\n"
             f"Rule ID: {f['rule_id']}\n"
-            f"Title: {f['title']}\n"
             f"Category: {f['category']}\n"
-            f"Rule Confidence Weight: {f.get('confidence_weight', 0.0):.2f}\n"
-            f"Detected Confidence Score: {confidence_score:.2f}\n"
-            f"Rule Suggested Severity: {f['severity_suggested']}\n"
-            f"\nEvidence:\n"
-            f"  File: {primary_evidence['file']}\n"
-            f"  Location: {location_str}\n"
-            f"  Evidence Snippet (from rule detection):\n"
-            f"  {primary_evidence['snippet']}\n"
+            f"Description: {description}\n"
+            f"Confidence Score: {confidence_score:.2f}\n"
+            f"Source File(s): {source_files_str}\n"
+            f"Evidence Summary: {evidence_summary}\n"
         )
         
         # Include additional evidence entries if present

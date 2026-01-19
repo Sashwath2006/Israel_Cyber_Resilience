@@ -192,3 +192,95 @@ class TestLLMOutputValidation:
         assert not is_valid
         assert len(error_msg) > 0, "Error message should not be empty"
         assert "dictionary" in error_msg.lower() or "dict" in error_msg.lower()
+    
+    def test_validation_rejects_invented_rule_id(self):
+        """Phase 9: Verify validation rejects outputs that invent new rule IDs."""
+        from app.llm_validation import validate_output_does_not_invent_vulnerabilities
+        
+        # LLM output that references a different rule ID (invented vulnerability)
+        output = {
+            "finding_id": "test-123",
+            "summary": "This finding indicates vulnerability A-999 (invented rule ID)",
+            "impact": "High impact from rule B-888",
+            "suggested_severity": "High",
+            "remediation": ["Step 1"],
+            "confidence_note": "Test",
+            "disclaimer": "Suggested analysis only",
+        }
+        
+        # Expected rule ID is A-001, but output mentions A-999 and B-888
+        is_safe, error_msg = validate_output_does_not_invent_vulnerabilities(
+            output,
+            expected_rule_id="A-001",
+        )
+        
+        assert not is_safe, "Validation should reject invented rule IDs"
+        assert "rule ID" in error_msg.lower() or "A-999" in error_msg or "B-888" in error_msg
+        assert "invent" in error_msg.lower() or "does not match" in error_msg.lower()
+    
+    def test_validation_accepts_correct_rule_id(self):
+        """Phase 9: Verify validation accepts outputs with correct rule ID."""
+        from app.llm_validation import validate_output_does_not_invent_vulnerabilities
+        
+        # LLM output that correctly references the expected rule ID
+        output = {
+            "finding_id": "test-123",
+            "summary": "This finding is related to rule A-001",
+            "impact": "Impact description",
+            "suggested_severity": "High",
+            "remediation": ["Step 1"],
+            "confidence_note": "Test",
+            "disclaimer": "Suggested analysis only",
+        }
+        
+        is_safe, error_msg = validate_output_does_not_invent_vulnerabilities(
+            output,
+            expected_rule_id="A-001",
+        )
+        
+        assert is_safe, f"Validation should accept correct rule ID: {error_msg}"
+        assert error_msg == ""
+    
+    def test_validation_rejects_schema_violation_missing_required_fields(self):
+        """Phase 9: Verify validation rejects schema violations (missing required fields)."""
+        # Output missing required field "confidence_note"
+        output = {
+            "finding_id": "test-123",
+            "summary": "Test summary",
+            "impact": "Test impact",
+            "suggested_severity": "High",
+            "remediation": ["Step 1"],
+            # Missing: "confidence_note"
+            "disclaimer": "Suggested analysis only",
+        }
+        
+        is_valid, error_msg = validate_llm_reasoning_output(
+            output,
+            expected_finding_id="test-123",
+            allowed_file_names={"test.txt"},
+        )
+        
+        assert not is_valid, "Validation should reject missing required fields"
+        assert "Missing required fields" in error_msg or "confidence_note" in error_msg
+    
+    def test_validation_rejects_schema_violation_invalid_remediation_type(self):
+        """Phase 9: Verify validation rejects schema violations (invalid remediation type)."""
+        # Output with remediation as string instead of list
+        output = {
+            "finding_id": "test-123",
+            "summary": "Test summary",
+            "impact": "Test impact",
+            "suggested_severity": "High",
+            "remediation": "Step 1, Step 2",  # Should be a list, not a string
+            "confidence_note": "Test note",
+            "disclaimer": "Suggested analysis only",
+        }
+        
+        is_valid, error_msg = validate_llm_reasoning_output(
+            output,
+            expected_finding_id="test-123",
+            allowed_file_names={"test.txt"},
+        )
+        
+        assert not is_valid, "Validation should reject invalid remediation type"
+        assert "remediation" in error_msg.lower() or "list" in error_msg.lower()

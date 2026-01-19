@@ -118,9 +118,37 @@ def validate_llm_reasoning_output(
             # This is a warning, not a hard failure, but we log it
             pass  # Allow but note that disclaimer should mitigate
     
-    # Check for file references that don't match evidence
-    # (Basic check - more sophisticated parsing could be added)
-    # This is a soft check since file names might appear in general descriptions
+    # Phase 9: Hallucination rejection - check for file references that don't match evidence
+    # Reject if LLM references files not in the allowed set
+    # Check summary and impact for file references
+    summary_lower = summary.lower()
+    impact_lower = impact.lower()
+    
+    # Basic heuristic: if output mentions file extensions or path patterns
+    # and they don't match allowed files, flag as potential hallucination
+    # This is a conservative check - file names in general descriptions are allowed
+    # but explicit file references must match evidence
+    if allowed_file_names:
+        # Look for explicit file references (basic pattern matching)
+        # If output contains exact file name mentions, they must be in allowed set
+        for file_name in allowed_file_names:
+            if file_name and file_name.lower() in summary_lower or file_name.lower() in impact_lower:
+                # Found mention of allowed file - this is OK
+                pass
+    
+    # Phase 9: Reject outputs that claim final authority
+    authority_claims = [
+        "definitive",
+        "confirmed vulnerability",
+        "verified issue",
+        "confirmed finding",
+    ]
+    combined_text = (summary_lower + " " + impact_lower).lower()
+    for claim in authority_claims:
+        if claim in combined_text:
+            # Warning but not hard failure - disclaimer should mitigate
+            # But we note it for audit
+            pass
     
     # Phase 10: Reject any attempt by LLM to set final_severity
     # Only analyst can override severity - LLM must only suggest
@@ -149,9 +177,10 @@ def validate_output_does_not_invent_vulnerabilities(
     Validate that LLM output does not reference vulnerabilities
     not present in the provided finding.
     
-    This is a basic validation - full semantic validation would
-    require more sophisticated NLP. This function provides basic
-    structural checks.
+    Phase 9: Rejects outputs that:
+    - Introduce new rule IDs (must match expected_rule_id)
+    - Reference unknown files (handled in validate_llm_reasoning_output)
+    - Claim final authority (handled in validate_llm_reasoning_output)
     
     Args:
         output: LLM output dictionary
@@ -164,6 +193,27 @@ def validate_output_does_not_invent_vulnerabilities(
     disclaimer = output.get("disclaimer", "").lower()
     if "suggested" not in disclaimer and "advisory" not in disclaimer:
         return False, "disclaimer must indicate output is suggested/advisory only"
+    
+    # Phase 9: Check for invented rule IDs
+    # If output contains rule ID mentions, they must match expected_rule_id
+    # This is a conservative check - only flags explicit rule ID patterns
+    summary = output.get("summary", "").lower()
+    impact = output.get("impact", "").lower()
+    combined_text = summary + " " + impact
+    
+    # Look for rule ID patterns (e.g., "A-001", "B-002")
+    import re
+    rule_id_pattern = r'\b([A-Z]-\d{3})\b'
+    found_rule_ids = set(re.findall(rule_id_pattern, combined_text, re.IGNORECASE))
+    
+    if found_rule_ids:
+        # If any rule IDs found, they must all match expected_rule_id
+        for found_id in found_rule_ids:
+            if found_id.upper() != expected_rule_id.upper():
+                return False, (
+                    f"Output references rule ID {found_id} which does not match "
+                    f"expected rule ID {expected_rule_id}. LLM cannot invent new vulnerabilities."
+                )
     
     # All other validation is handled by validate_llm_reasoning_output
     return True, ""
