@@ -1,3 +1,15 @@
+"""
+Security Rule Engine: The "Deterministic Guard" of the Project.
+
+This engine executes high-confidence, pattern-based security rules. Unlike AI, 
+it is deterministic—meaning it provides the same reliable results every time.
+
+Core Principles:
+1. Detection-First: Every potential risk is flagged.
+2. Evidence-Based: Every finding must point to a specific file and line.
+3. Auditable Suppression: False positives are marked, never hidden, ensuring a complete audit trail.
+"""
+
 import re
 import uuid
 
@@ -19,41 +31,41 @@ from rules.suppression import (
     validate_suppression_metadata,
 )
 
-# All file types for rules that should apply to all supported types (Phase 8.4)
-ALL_FILE_TYPES = SUPPORTED_FILE_TYPES  # {"log", "csv", "json", "text"}
+# Rule set configuration
+ALL_FILE_TYPES = SUPPORTED_FILE_TYPES
 
 # ============================================================
 # FALSE POSITIVE SUPPRESSION (DETERMINISTIC & AUDITABLE)
 # ============================================================
 
 SUPPRESSION_PATTERNS = [
-    # Commented lines
+    # Lines that are explicitly commented out in code
     r"^\s*#",
     r"^\s*//",
     r"^\s*/\*",
 
-    # Placeholder / dummy values
+    # Generic placeholders often found in templates or tutorials
     r"(example|changeme|your_|dummy|test)",
 
-    # Documentation / explanation context
+    # Context that indicates the line is part of a manual or readme
     r"(documentation|readme|usage|how to)",
 
-    # Explicit non-sensitive markers
+    # Explicit markers used by developers to indicate non-sensitive data
     r"<redacted>",
     r"<placeholder>",
     r"not_used",
 ]
 
-# Precompile suppression patterns for performance (Phase 8.6)
+# Optimized precompilation for lightning-fast scanning
 SUPPRESSION_PATTERNS_COMPILED = [re.compile(pattern, re.IGNORECASE) for pattern in SUPPRESSION_PATTERNS]
 
 
 def is_suppressed(content: str) -> bool:
     """
-    Returns True if the content matches any explicit
-    false-positive suppression pattern.
+    Checks if a piece of content matches a known "safe" pattern.
     
-    Uses precompiled patterns for performance (Phase 8.6).
+    This helps the analyst focus on real threats while preserving 
+    the "noise" for future audit if needed.
     """
     for compiled_pattern in SUPPRESSION_PATTERNS_COMPILED:
         if compiled_pattern.search(content):
@@ -62,10 +74,11 @@ def is_suppressed(content: str) -> bool:
 
 
 # ============================================================
-# PHASE 8 RULE TAXONOMY (DETERMINISTIC)
+# DETERMINISTIC RULE TAXONOMY
 # ============================================================
 
 RULES = [
+    # Categorized by threat type for better reporting and organization
 
     # -----------------------------
     # A — Credentials & Secrets

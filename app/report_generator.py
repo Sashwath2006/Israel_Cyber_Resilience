@@ -24,6 +24,7 @@ def generate_sample_report(
     findings: list[dict],
     scope: Optional[str] = None,
     model_id: Optional[str] = None,
+    template: str = "default",
 ) -> dict:
     """
     Generate a sample security report from findings.
@@ -34,6 +35,8 @@ def generate_sample_report(
     Args:
         findings: List of findings (should have Phase 10 severity fields)
         scope: Optional scope description
+        model_id: Optional LLM model ID for executive summary generation
+        template: Template name for report formatting (default, executive, technical)
     
     Returns:
         Dictionary with report structure:
@@ -43,6 +46,7 @@ def generate_sample_report(
             "methodology": str,
             "findings": [...],  # Structured finding entries
             "risk_overview": str,
+            "template": str,  # Template used for formatting
         }
     """
     # Filter active findings (exclude suppressed)
@@ -87,7 +91,8 @@ def generate_sample_report(
     # Generate risk overview
     risk_overview = _generate_risk_overview(severity_counts, total_active)
     
-    return {
+    # Build base report content
+    report_content = {
         "executive_summary": exec_summary,
         "scope": scope_text,
         "methodology": methodology,
@@ -99,7 +104,13 @@ def generate_sample_report(
             "severity_breakdown": severity_counts,
             "generated_at": datetime.utcnow().isoformat() + "Z",
         },
+        "template": template,
     }
+    
+    # Apply template formatting (affects presentation only, not content)
+    formatted_report = _apply_template_formatting(report_content, template)
+    
+    return formatted_report
 
 
 def _generate_executive_summary_with_llm(
@@ -323,3 +334,77 @@ def _generate_risk_overview(severity_counts: dict[str, int], total_active: int) 
     ]
     
     return "\n".join(lines)
+
+
+def _apply_template_formatting(report_content: dict, template: str) -> dict:
+    """
+    Apply template-specific formatting to report content.
+    
+    Templates affect presentation only - NOT content, severity, or findings.
+    All templates are static, deterministic, and stored locally.
+    
+    Args:
+        report_content: Base report content (template-agnostic)
+        template: Template name (default, executive, technical)
+    
+    Returns:
+        Report content with template-specific formatting applied
+    
+    Raises:
+        ValueError: If template name is unknown
+    """
+    # Validate template
+    valid_templates = ["default", "executive", "technical"]
+    if template not in valid_templates:
+        raise ValueError(f"Unknown template: {template}. Valid templates: {', '.join(valid_templates)}")
+    
+    # Route to specific template formatter
+    if template == "default":
+        return _format_default_template(report_content)
+    elif template == "executive":
+        return _format_executive_template(report_content)
+    elif template == "technical":
+        return _format_technical_template(report_content)
+    else:
+        # Fallback to default (should never reach here due to validation above)
+        return _format_default_template(report_content)
+
+
+def _format_default_template(content: dict) -> dict:
+    """
+    Default template: Balanced view for general security analysts.
+    Includes all sections with moderate detail.
+    """
+    # Default template: return content as-is (no formatting changes)
+    return content
+
+
+def _format_executive_template(content: dict) -> dict:
+    """
+    Executive template: High-level summary focused on business impact.
+    Emphasizes executive summary and risk overview, minimal technical details.
+    """
+    # Executive template: same content, but can add formatting hints
+    formatted = content.copy()
+    formatted["presentation_hints"] = {
+        "emphasis": "executive_summary",
+        "detail_level": "high_level",
+        "include_technical_details": False,
+    }
+    return formatted
+
+
+def _format_technical_template(content: dict) -> dict:
+    """
+    Technical template: Detailed technical analysis for security engineers.
+    Emphasizes evidence, code snippets, and remediation steps.
+    """
+    # Technical template: same content, but can add formatting hints
+    formatted = content.copy()
+    formatted["presentation_hints"] = {
+        "emphasis": "findings",
+        "detail_level": "technical",
+        "include_code_snippets": True,
+        "include_remediation_steps": True,
+    }
+    return formatted

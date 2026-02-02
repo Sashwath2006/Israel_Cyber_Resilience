@@ -1,3 +1,15 @@
+"""
+Document Ingestion System: The "Librarian" of the Project.
+
+This module acts as a high-fidelity document processor. It transforms raw, diverse 
+data sources (ZIPs, directories, CSVs, JSONs, raw logs) into standardized "Knowledge Chunks".
+
+Design Intent:
+- Maintain strict line-number fidelity for evidence verification.
+- Segment data into digestable sizes for both Rule-Engine and LLM processing.
+- Ensure cross-platform compatibility with robust encoding handling.
+"""
+
 import json
 import csv
 import uuid
@@ -8,29 +20,29 @@ from typing import Optional, Union
 
 def ingest_file(file_path: str) -> list[dict]:
     """
-    Ingest a single file, ZIP archive, or directory.
+    The entry point for data collection. Acts as a smart dispatcher 
+    that decides how to best process the incoming source.
     
     Args:
-        file_path: Path to file, ZIP archive, or directory
+        file_path: Absolute or relative path to the data source.
     
     Returns:
-        List of document chunks
+        A list of standardized document chunks ready for analysis.
     """
     path = Path(file_path)
     
-    # Handle ZIP files
+    # Delegate to specialized handlers based on source type
     if path.suffix.lower() == ".zip":
         return _ingest_zip(path)
     
-    # Handle directories
     if path.is_dir():
         return _ingest_directory(path)
     
-    # Handle individual files
+    # Process individual files based on their digital format
     suffix = path.suffix.lower().lstrip(".")
     
     if suffix not in {"txt", "log", "conf", "config", "csv", "json"}:
-        raise ValueError(f"Unsupported file type: {suffix}")
+        raise ValueError(f"Unsupported file type: {suffix}. Only text, configuration, and structured data files are supported.")
     
     if suffix in {"txt", "log", "conf", "config"}:
         return _ingest_text(path, suffix)
@@ -43,20 +55,20 @@ def ingest_file(file_path: str) -> list[dict]:
 
 
 def _ingest_zip(zip_path: Path) -> list[dict]:
-    """Extract and ingest all supported files from a ZIP archive."""
+    """Unpacks and audits all supported content within a ZIP archive."""
     chunks = []
     
     try:
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            # Get list of files in ZIP
+            # Analyze the archive contents
             file_list = zip_ref.namelist()
             
             for file_name in file_list:
-                # Skip directories
+                # We skip directory markers to focus on actual data files
                 if file_name.endswith('/'):
                     continue
                 
-                # Check if file type is supported
+                # Verify file compatibility before extraction
                 file_path = Path(file_name)
                 suffix = file_path.suffix.lower().lstrip(".")
                 
@@ -64,10 +76,10 @@ def _ingest_zip(zip_path: Path) -> list[dict]:
                     continue
                 
                 try:
-                    # Extract file content
+                    # Decoding with 'ignore' ensures robustness against mixed-encoding files
                     content = zip_ref.read(file_name).decode('utf-8', errors='ignore')
                     
-                    # Create temporary file-like content for processing
+                    # Direct memory processing for efficiency (bypasses temp files)
                     if suffix in {"txt", "log", "conf", "config"}:
                         file_chunks = _ingest_text_content(file_name, content, suffix)
                     elif suffix == "csv":
@@ -78,24 +90,24 @@ def _ingest_zip(zip_path: Path) -> list[dict]:
                         continue
                     
                     chunks.extend(file_chunks)
-                except Exception as e:
-                    # Skip files that can't be processed
+                except Exception:
+                    # Silently skip files that are corrupt or unreadable
                     continue
     
     except zipfile.BadZipFile:
-        raise ValueError(f"Invalid ZIP file: {zip_path}")
+        raise ValueError(f"Invalid ZIP file detected: {zip_path}")
     except Exception as e:
-        raise ValueError(f"Failed to process ZIP file: {e}")
+        raise ValueError(f"An unexpected error occurred while processing the archive: {e}")
     
     return chunks
 
 
 def _ingest_directory(dir_path: Path) -> list[dict]:
-    """Recursively ingest all supported files from a directory."""
+    """Walks through a directory tree, gathering every piece of relevant documentation."""
     chunks = []
     supported_extensions = {".txt", ".log", ".conf", ".config", ".csv", ".json"}
     
-    # Recursively find all supported files
+    # Recursively discover all supported files
     for file_path in dir_path.rglob("*"):
         if not file_path.is_file():
             continue
@@ -104,10 +116,11 @@ def _ingest_directory(dir_path: Path) -> list[dict]:
             continue
         
         try:
+            # Leverage the main entry point to maintain unified processing logic
             file_chunks = ingest_file(str(file_path))
             chunks.extend(file_chunks)
-        except Exception as e:
-            # Skip files that can't be processed
+        except Exception:
+            # Resiliently continue even if some files fail
             continue
     
     return chunks
