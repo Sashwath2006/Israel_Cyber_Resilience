@@ -1,0 +1,20 @@
+{
+  "admin": {
+    "password_hash": "05c94e3dd22fe735c0242c8448aafd71c035fb15934bc7b393df53148df572f140065d6e4f3de5a48565cac6054d0224",
+    "role": "administrator",
+    "active": true,
+    "created_at": "2026-02-02T19:53:44.008633"
+  },
+  "analyst": {
+    "password_hash": "9528ec5479ed54aae4f4479f00235e9d638367c9b63229518651369f09c64f4e37a10188b5e299e6edf9057193fe8f5f",
+    "role": "analyst",
+    "active": true,
+    "created_at": "2026-02-02T19:53:44.044076"
+  },
+  "local_analyst": {
+    "password_hash": "1aee86c0fcc0f249f6a8a38ebf8c2297572fbce655a4cae8db44bcc99b64d4bab00a1223de95fcf961bcb66f0a2b03f3",
+    "role": "analyst",
+    "active": true,
+    "created_at": "2026-02-03T10:18:01.638414"
+  }
+}

@@ -48,9 +48,9 @@ def build_context(findings: list[dict], task: str) -> str:
 
     body = ["PROVIDED FINDINGS:"]
 
-    for f in sorted(findings, key=lambda x: (x["rule_id"], x["evidence"][0]["file"] if x["evidence"] else "")):
+    for f in sorted(findings, key=lambda x: (x["rule_id"], _safe_get_evidence_file(x))):
         # Evidence is now a list (Phase 8.2 normalized schema)
-        evidence_list = f["evidence"]
+        evidence_list = f.get("evidence", [])
         
         if not evidence_list:
             continue  # Skip findings with no evidence
@@ -58,11 +58,14 @@ def build_context(findings: list[dict], task: str) -> str:
         # Use first evidence entry for primary context (multiple entries supported)
         primary_evidence = evidence_list[0]
         
-        # Build evidence section with normalized fields
-        location = primary_evidence["location"]
+        # Build evidence section with normalized fields (safe access)
+        location = primary_evidence.get("location", {})
+        location_type = location.get("type", "line")
+        location_start = location.get("start", "?")
+        location_end = location.get("end")
         location_str = (
-            f"{location['type']} {location['start']}"
-            + (f"-{location['end']}" if location.get("end") else "")
+            f"{location_type} {location_start}"
+            + (f"-{location_end}" if location_end else "")
         )
         
         # Include confidence_score for context (Phase 9)
@@ -74,11 +77,16 @@ def build_context(findings: list[dict], task: str) -> str:
         description = f.get("title", f.get("name", ""))
         
         # Build evidence summary (truncated snippet)
-        evidence_summary = primary_evidence.get("snippet", "")[:200] + ("..." if len(primary_evidence.get("snippet", "")) > 200 else "")
+        snippet = primary_evidence.get("snippet", "")
+        evidence_summary = snippet[:200] + ("..." if len(snippet) > 200 else "")
         
-        # Collect all source files from evidence
-        source_files = [evidence.get("file", "") for evidence in evidence_list if evidence.get("file")]
-        source_files_str = ", ".join(set(source_files))  # Deduplicate
+        # Collect all source files from evidence (safe access)
+        source_files = []
+        for evidence in evidence_list:
+            file_name = evidence.get("file") or evidence.get("location", {}).get("file")
+            if file_name:
+                source_files.append(file_name)
+        source_files_str = ", ".join(set(filter(None, source_files)))  # Deduplicate
         
         body.append(
             f"\nFINDING ID: {f['finding_id']}\n"
@@ -94,10 +102,13 @@ def build_context(findings: list[dict], task: str) -> str:
         if len(evidence_list) > 1:
             body.append(f"  Additional Evidence Entries: {len(evidence_list) - 1}")
             for idx, additional_evidence in enumerate(evidence_list[1:], start=2):
-                additional_location = additional_evidence["location"]
+                additional_location = additional_evidence.get("location", {})
+                additional_location_type = additional_location.get("type", "line")
+                additional_location_start = additional_location.get("start", "?")
+                additional_location_end = additional_location.get("end")
                 additional_location_str = (
-                    f"{additional_location['type']} {additional_location['start']}"
-                    + (f"-{additional_location['end']}" if additional_location.get("end") else "")
+                    f"{additional_location_type} {additional_location_start}"
+                    + (f"-{additional_location_end}" if additional_location_end else "")
                 )
                 body.append(
                     f"    Entry {idx}: {additional_evidence['file']} at {additional_location_str}"
@@ -112,6 +123,20 @@ def build_context(findings: list[dict], task: str) -> str:
     )
 
     return header + "\n".join(body) + task_block
+
+
+
+
+def _safe_get_evidence_file(finding: dict) -> str:
+    """Safely extract file name from finding evidence for sorting."""
+    try:
+        evidence_list = finding.get("evidence", [])
+        if not evidence_list:
+            return ""
+        primary = evidence_list[0]
+        return primary.get("file") or primary.get("location", {}).get("file") or ""
+    except Exception:
+        return ""
 
 
 def build_single_finding_context(finding: dict) -> str:

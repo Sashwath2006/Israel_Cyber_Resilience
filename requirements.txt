@@ -3,3 +3,4 @@ psutil>=5.9
 requests>=2.31
 pytest>=7.0
 reportlab>=4.0
+structlog>=23.0

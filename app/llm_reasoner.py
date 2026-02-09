@@ -13,7 +13,7 @@ Design Philosophy:
 
 import json
 
-from app.ollama_client import generate
+from app.ollama_client import generate, is_ollama_available
 from app.context_builder import build_single_finding_context
 from app.llm_validation import (
     validate_llm_reasoning_output,
@@ -51,6 +51,10 @@ def explain_single_finding(
     Returns:
         A success flag and either a structured analysis dictionary or a clear error.
     """
+    # Pre-flight Check: Ensure Ollama is available before proceeding
+    if not is_ollama_available():
+        return False, "AI Assistant unavailable: Local LLM service not responding. Please check Ollama is running."
+    
     # Integrity Check: Ensure we have enough data to form an opinion
     if "finding_id" not in finding:
         return False, "Analysis failed: Finding is missing its unique identifier."

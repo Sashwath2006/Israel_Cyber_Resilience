@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QFont, QTextCursor, QAction
 from PySide6.QtCore import Qt, Signal, QThread
 from typing import Optional
+from datetime import datetime
 import os
 
 from app.hardware import detect_hardware
@@ -24,15 +25,26 @@ from app.finding_integration import enhance_findings_with_severity_fields
 from app.severity_override import get_final_severity
 from app.report_model import ReportWorkspace
 from app.report_generator import generate_sample_report
-from app.ai_assistant import assist_report_editing, discuss_vulnerability
+from app.ai_assistant import (
+    assist_report_editing_advanced,
+    discuss_vulnerability,
+    RewriteContext,
+    detect_report_section
+)
 from app.report_exporter import export_to_markdown, export_to_pdf
 from app.report_state import ReportState, ReportStatus
+from app.logging_config import get_logger
+from app.auth import session_manager, user_manager, access_control, require_auth, require_permission
+from app.report_edit_engine import ReportEditEngine
+from app.report_version_manager import ReportVersionManager
+from app.report_edit_ui import EditUIHandler
 
 
 class ScanWorker(QThread):
     """Background worker for scanning operations."""
     status_update = Signal(str)
     scan_complete = Signal(list, list)  # chunks, findings
+    error_occurred = Signal(str)  # Error signal
     
     def __init__(self, file_paths: list[str]):
         super().__init__()
@@ -46,9 +58,13 @@ class ScanWorker(QThread):
             # Ingest files
             self.status_update.emit(f"[Ingesting {len(self.file_paths)} file(s)...]")
             for path in self.file_paths:
-                file_chunks = ingest_file(path)
-                chunks.extend(file_chunks)
-                self.status_update.emit(f"  ✓ {os.path.basename(path)}: {len(file_chunks)} chunks")
+                try:
+                    file_chunks = ingest_file(path)
+                    chunks.extend(file_chunks)
+                    self.status_update.emit(f"  ✓ {os.path.basename(path)}: {len(file_chunks)} chunks")
+                except Exception as e:
+                    self.status_update.emit(f"  ⚠ Error processing {os.path.basename(path)}: {str(e)}")
+                    continue  # Continue with other files
             
             # Run analysis
             self.status_update.emit("[Running security analysis...]")
@@ -58,7 +74,7 @@ class ScanWorker(QThread):
             self.scan_complete.emit(chunks, findings)
             
         except Exception as e:
-            self.status_update.emit(f"[ERROR] {str(e)}")
+            self.error_occurred.emit(str(e))
 
 
 class ChatMessage(QWidget):
@@ -280,6 +296,13 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Vulnerability Analysis Workbench")
         self.resize(1600, 900)
         
+        # Logger
+        self.logger = get_logger("MainWindow")
+        
+        # Authentication
+        self.session_token = None
+        self.current_user = None
+        
         # State
         self.models = get_model_registry()
         self.report_workspace: Optional[ReportWorkspace] = None
@@ -288,7 +311,91 @@ class MainWindow(QMainWindow):
         self.rule_findings: list[dict] = []
         self.report_state = ReportState()
         
+        # Edit engine and version manager
+        # Will be initialized when model is selected
+        self.edit_engine: Optional[ReportEditEngine] = None
+        self.version_manager = ReportVersionManager(max_versions=50)
+        self.edit_ui_handler: Optional[EditUIHandler] = None
+        
+        # Initialize auth
+        self._initialize_auth()
+        
         self._build_ui()
+        self.logger.info("MainWindow initialized")
+    
+    def _initialize_auth(self):
+        """Initialize authentication system."""
+        # Ensure default users are available
+        # Create a local_analyst user if it doesn't exist in users.json
+        if "local_analyst" not in user_manager.users:
+            user_manager.users["local_analyst"] = {
+                "password_hash": user_manager._hash_password("local_analyst"),
+                "role": "analyst",
+                "active": True,
+                "created_at": datetime.now().isoformat()
+            }
+            user_manager._save_users(user_manager.users)
+        
+        # Attempt to create a default session
+        self.session_token = session_manager.create_session(
+            user_id="desktop_user",
+            username="local_analyst"
+        )
+        self.current_user = "local_analyst"
+        self.logger.info("Authentication initialized", user=self.current_user)
+    
+    def _check_permission(self, permission: str) -> bool:
+        """
+        Check if the current user has a specific permission.
+        
+        Args:
+            permission: Permission to check
+            
+        Returns:
+            True if user has permission, False otherwise
+        """
+        if not self.session_token:
+            return False
+        
+        # Validate session
+        if not session_manager.validate_session(self.session_token):
+            return False
+        
+        # Get user role and check permissions
+        role = user_manager.get_user_role(self.current_user)
+        if not role:
+            return False
+        
+        return access_control.has_permission(role, permission)
+    
+    def _initialize_edit_handler(self):
+        """Initialize the edit engine and UI handler."""
+        if self.edit_ui_handler:
+            return  # Already initialized
+        
+        # Get selected model
+        model_name = self.model_selector.currentText()
+        model_id = None
+        for m in self.models:
+            if m["name"] == model_name:
+                model_id = m.get("ollama_id") or m.get("id")
+                break
+        
+        if not model_id:
+            self.logger.warning("No model ID found for edit engine")
+            return
+        
+        # Initialize edit engine
+        self.edit_engine = ReportEditEngine(model_id=model_id, temperature=0.3)
+        
+        # Initialize UI handler
+        self.edit_ui_handler = EditUIHandler(
+            edit_engine=self.edit_engine,
+            version_manager=self.version_manager,
+            main_window=self,
+        )
+        
+        self.logger.info(f"Edit handler initialized with model: {model_id}")
         
     def _build_ui(self):
         """Build two-pane workbench."""
@@ -324,7 +431,7 @@ class MainWindow(QMainWindow):
         
         # Welcome message
         self.chat_pane.add_message(
-            "Welcome to the Vulnerability Analysis Workbench.\n\n"
+            f"Welcome {self.current_user} to the Vulnerability Analysis Workbench.\n\n"
             "Upload files using the '+' button to begin analysis.",
             is_user=False
         )
@@ -419,16 +526,45 @@ class MainWindow(QMainWindow):
     
     def _handle_file_upload(self, paths: list[str]):
         """Handle file upload from chat."""
+        # Check if user has permission to analyze files
+        if not self._check_permission("analyze_files"):
+            self.chat_pane.add_message("[ERROR] Permission denied: analyze_files required", is_user=False)
+            return
+        
+        # Pre-flight validation: Check files are accessible and reasonable size
+        MAX_FILE_SIZE = 100 * 1024 * 1024  # 100 MB max
+        invalid_files = []
+        
+        for path in paths:
+            if not os.path.exists(path):
+                invalid_files.append(f"File not found: {os.path.basename(path)}")
+            elif not os.access(path, os.R_OK):
+                invalid_files.append(f"Permission denied: {os.path.basename(path)}")
+            elif os.path.isfile(path) and os.path.getsize(path) > MAX_FILE_SIZE:
+                invalid_files.append(f"File too large (>100MB): {os.path.basename(path)}")
+        
+        if invalid_files:
+            self.chat_pane.add_message(
+                "[ERROR] Pre-flight validation failed:\n" + "\n".join(f"  • {msg}" for msg in invalid_files),
+                is_user=False
+            )
+            return
+        
         self.chat_pane.add_message(
             f"Analyzing {len(paths)} file(s)...\n" + "\n".join([f"• {os.path.basename(p)}" for p in paths]),
             is_user=False
         )
         
         # Start background scan
-        self.scan_worker = ScanWorker(paths)
-        self.scan_worker.status_update.connect(lambda msg: self.chat_pane.add_message(msg, is_user=False))
-        self.scan_worker.scan_complete.connect(self._handle_scan_complete)
-        self.scan_worker.start()
+        try:
+            self.scan_worker = ScanWorker(paths)
+            self.scan_worker.status_update.connect(lambda msg: self.chat_pane.add_message(msg, is_user=False))
+            self.scan_worker.scan_complete.connect(self._handle_scan_complete)
+            self.scan_worker.error_occurred.connect(self._handle_scan_error)
+            self.scan_worker.start()
+        except Exception as e:
+            self.logger.error("Failed to start scan", error=str(e))
+            self.chat_pane.add_message(f"[ERROR] Failed to start scan: {str(e)}", is_user=False)
     
     def _handle_scan_complete(self, chunks: list[dict], findings: list[dict]):
         """Handle completed scan."""
@@ -478,6 +614,28 @@ class MainWindow(QMainWindow):
             
         except Exception as e:
             self.chat_pane.add_message(f"[ERROR] Failed to generate report: {str(e)}", is_user=False)
+    
+    def _handle_scan_error(self, error_msg: str):
+        """Handle scan error with user-friendly messaging."""
+        self.logger.error("Scan failed", error=error_msg)
+        
+        # Format error for user without raw tracebacks
+        user_msg = error_msg
+        if "No such file or directory" in error_msg or "FileNotFoundError" in error_msg:
+            user_msg = "File not found. Please check the file path is correct."
+        elif "Permission denied" in error_msg:
+            user_msg = "Permission denied. Please check file accessibility and try again."
+        elif "Memory" in error_msg or "OutOfMemory" in error_msg:
+            user_msg = "Insufficient memory. Please close other applications and try again."
+        elif "JSON" in error_msg or "decode" in error_msg:
+            user_msg = "File format error. Please check the file is valid JSON/CSV/TXT."
+        
+        self.chat_pane.add_message(f"[ERROR] Scan failed: {user_msg}", is_user=False)
+    
+    def _handle_permission_denied(self, permission: str):
+        """Handle permission denied events."""
+        self.logger.warning("Permission denied", permission=permission, user=self.current_user)
+        self.chat_pane.add_message(f"[ACCESS DENIED] Permission '{permission}' required", is_user=False)
     
     def _format_report_for_display(self, report_data: dict) -> str:
         """Format report data as plain text."""
@@ -541,51 +699,135 @@ class MainWindow(QMainWindow):
         return "\n".join(lines)
     
     def _handle_user_message(self, text: str):
-        """Handle user message in chat."""
-        # Check if asking about report
-        text_lower = text.lower()
+        """
+        Handle user message in chat.
         
-        if "rewrite" in text_lower or "improve" in text_lower or "summarize" in text_lower:
-            # Get selected text from report
-            cursor = self.report_editor.textCursor()
-            selected = cursor.selectedText()
+        Improved workflow:
+        1. Detect edit commands (rewrite, undo, history, etc.)
+        2. Handle special commands
+        3. Process edit requests with AI
+        4. Fallback to report info
+        """
+        try:
+            text_lower = text.lower()
             
-            if selected:
-                self.chat_pane.add_message(
-                    f"I can suggest improvements, but you'll need to manually apply them to the report.\n\n"
-                    f"Selected text:\n{selected[:200]}...",
-                    is_user=False
+            # SPECIAL COMMANDS
+            if text_lower == "undo":
+                if not self.edit_ui_handler:
+                    self._initialize_edit_handler()
+                self.edit_ui_handler.handle_undo()
+                return
+            
+            if text_lower == "history":
+                if not self.edit_ui_handler:
+                    self._initialize_edit_handler()
+                self.edit_ui_handler.show_version_history()
+                return
+            
+            # REWRITE INTENT DETECTION
+            is_rewrite_request = EditUIHandler.is_edit_command(text)
+            
+            if is_rewrite_request:
+                # Initialize edit handler if needed
+                if not self.edit_ui_handler:
+                    self._initialize_edit_handler()
+                
+                # Get selected text from report
+                cursor = self.report_editor.textCursor()
+                selected_text = cursor.selectedText()
+                
+                if not selected_text:
+                    self.chat_pane.add_message(
+                        "📝 No text selected.\n\n"
+                        "To rewrite content:\n"
+                        "1. Select text in the report editor\n"
+                        "2. Ask me to rewrite it (e.g., 'make this concise', 'formal tone')",
+                        is_user=False
+                    )
+                    return
+                
+                # Get model
+                model_name = self.model_selector.currentText()
+                model_id = None
+                for m in self.models:
+                    if m["name"] == model_name:
+                        model_id = m.get("ollama_id") or m.get("id")
+                        break
+                
+                if not model_id:
+                    self.chat_pane.add_message(
+                        "⚠ No AI model selected. Please select a model.",
+                        is_user=False
+                    )
+                    return
+                
+                # Check Ollama availability
+                if not is_ollama_available():
+                    self.chat_pane.add_message(
+                        "⚠ AI service unavailable. Please ensure Ollama is running.",
+                        is_user=False
+                    )
+                    return
+                
+                # Detect report section
+                all_text = self.report_editor.toPlainText()
+                cursor_pos = cursor.position() - len(selected_text)
+                text_before = all_text[:cursor_pos]
+                section = detect_report_section(text_before)
+                
+                # Handle edit request through UI handler
+                self.edit_ui_handler.handle_edit_request(
+                    user_message=text,
+                    selected_text=selected_text,
+                    section_name=section.value
                 )
+                return
+            
+            # FALLBACK: Report-related questions
+            elif self.report_data:
+                total_findings = self.report_data.get('metadata', {}).get('total_findings', 0)
+                
+                if text_lower in ["hi", "hello", "hey"]:
+                    self.chat_pane.add_message(
+                        f"👋 Hello! Your report has {total_findings} finding(s).\n\n"
+                        f"📝 To edit your report:\n"
+                        f"   1. Select text in the left pane\n"
+                        f"   2. Ask me to 'rewrite', 'simplify', 'make formal', etc.\n\n"
+                        f"Commands:\n"
+                        f"   'undo' - Undo last edit\n"
+                        f"   'history' - Show edit history",
+                        is_user=False
+                    )
+                else:
+                    # Generic report info
+                    self.chat_pane.add_message(
+                        f"📊 Your report contains {total_findings} finding(s).\n\n"
+                        f"Select text to edit it or ask about a specific vulnerability.",
+                        is_user=False
+                    )
+            
+            # NO REPORT YET
             else:
                 self.chat_pane.add_message(
-                    "Please select text in the report editor first, then ask me to rewrite it.",
+                    "📁 No report loaded yet.\n\n"
+                    "Upload files using the '+' button to begin analysis.",
                     is_user=False
                 )
         
-        elif self.report_data and text_lower not in ["hi", "hello", "hey", "help", "what", "how"]:
-            # Only show the default message for non-generic queries
-            total_findings = self.report_data.get('metadata', {}).get('total_findings', 0)
+        except Exception as e:
+            self.logger.error("Failed to process message", error=str(e), exc_info=True)
             self.chat_pane.add_message(
-                f"I can see your report has {total_findings} findings. "
-                f"Select any section and ask me to rewrite it!",
-                is_user=False
-            )
-        elif self.report_data and text_lower in ["hi", "hello", "hey", "help", "what", "how"]:
-            # Handle common queries differently
-            total_findings = self.report_data.get('metadata', {}).get('total_findings', 0)
-            self.chat_pane.add_message(
-                f"Hello! Your report has {total_findings} findings. "
-                f"Ask me to rewrite or improve specific sections by selecting text first.",
-                is_user=False
-            )
-        else:
-            self.chat_pane.add_message(
-                "Upload files first to begin analysis. Use the '+' button to select files.",
+                f"❌ Error: {str(e)}\n\nPlease try again.",
                 is_user=False
             )
     
     def _finalize_report(self):
         """Finalize the report (make read-only)."""
+        # Check if user has permission to edit reports
+        if not self._check_permission("edit_reports"):
+            self.chat_pane.add_message("[ERROR] Permission denied: edit_reports required", is_user=False)
+            return
+        
         self.report_editor.set_finalized(True)
         self.finalize_btn.setEnabled(False)
         self.export_btn.setEnabled(True)
@@ -597,6 +839,11 @@ class MainWindow(QMainWindow):
     
     def _export_markdown(self):
         """Export report to Markdown."""
+        # Check if user has permission to export reports
+        if not self._check_permission("export_reports"):
+            QMessageBox.warning(self, "Permission Denied", "Export permission required.")
+            return
+        
         if not self.report_data:
             QMessageBox.warning(self, "No Report", "Generate a report first.")
             return
@@ -610,7 +857,12 @@ class MainWindow(QMainWindow):
                 self.chat_pane.add_message(f"✗ Export failed: {error}", is_user=False)
     
     def _export_pdf(self):
-        """Export report to PDF."""
+        """Export report to PDF with Markdown fallback."""
+        # Check if user has permission to export reports
+        if not self._check_permission("export_reports"):
+            QMessageBox.warning(self, "Permission Denied", "Export permission required.")
+            return
+        
         if not self.report_data:
             QMessageBox.warning(self, "No Report", "Generate a report first.")
             return
@@ -621,4 +873,15 @@ class MainWindow(QMainWindow):
             if success:
                 self.chat_pane.add_message(f"✓ Exported to: {path}", is_user=False)
             else:
-                self.chat_pane.add_message(f"✗ Export failed: {error}", is_user=False)
+                # PDF export failed, offer Markdown fallback
+                self.logger.warning("PDF export failed, trying Markdown fallback", error=error)
+                md_path = path.replace('.pdf', '.md')
+                success, error = export_to_markdown(self.report_data, self.report_workspace, md_path)
+                if success:
+                    self.chat_pane.add_message(
+                        f"⚠ PDF export failed. Exported as Markdown instead: {md_path}\n\n"
+                        f"Technical details: {error}",
+                        is_user=False
+                    )
+                else:
+                    self.chat_pane.add_message(f"✗ Export failed: {error}", is_user=False)

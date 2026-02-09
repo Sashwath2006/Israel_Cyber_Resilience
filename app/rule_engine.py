@@ -587,6 +587,12 @@ def run_rules(chunks: list[dict]) -> list[dict]:
                 f"Rule {rule.get('rule_id', 'UNKNOWN')} is missing required metadata fields"
             )
         
+        # Precompile regex patterns for performance (Phase 8.6)
+        if "compiled_patterns" not in rule:
+            rule["compiled_patterns"] = [
+                re.compile(pattern, re.IGNORECASE) for pattern in rule.get("patterns", [])
+            ]
+        
         # Validate confidence_weight is present and valid (Phase 8.3)
         if not validate_confidence_weight(rule.get("confidence_weight")):
             raise ValueError(
