@@ -674,7 +674,7 @@ def run_rules(chunks: list[dict]) -> list[dict]:
                             "Matched suppression pattern"
                             if pattern_suppressed else None
                         ),
-                        suppressed_by="system" if pattern_suppressed else None,
+                        suppressed_by="system",
                         suppressed_at=None,  # Auto-generated
                     )
 

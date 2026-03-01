@@ -8,6 +8,8 @@ Confidence is supporting data, not a decision.
 """
 
 import math
+from typing import Union
+from rules.metadata import Evidence
 
 
 # ============================================================
@@ -87,7 +89,7 @@ def calculate_confidence(
     return confidence
 
 
-def assess_evidence_completeness(evidence_list: list[dict]) -> float:
+def assess_evidence_completeness(evidence_list: Union[list[dict], list[Evidence]]) -> float:
     """
     Assess evidence completeness factor based on evidence characteristics.
     
@@ -95,7 +97,7 @@ def assess_evidence_completeness(evidence_list: list[dict]) -> float:
     Returns < 1.0 if evidence is incomplete (missing location, empty snippet, etc.).
     
     Args:
-        evidence_list: List of normalized evidence entries
+        evidence_list: List of normalized evidence entries (dict or Evidence objects)
     
     Returns:
         Completeness factor in range [0.0, 1.0]
