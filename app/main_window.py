@@ -34,12 +34,14 @@ from app.ai_assistant import (
 from app.report_exporter import export_to_markdown, export_to_pdf
 from app.report_state import ReportState, ReportStatus
 from app.logging_config import get_logger
+from app.visualization import VisualizationOrchestrator
 from app.auth import session_manager, user_manager, access_control, require_auth, require_permission
 from app.report_edit_engine import ReportEditEngine
 from app.report_version_manager import ReportVersionManager
 from app.report_edit_ui import EditUIHandler
 from app.ui.report_editor import ReportEditor
 from app.ui.editor_toolbar import EditorToolbar
+from app.ui.chart_integration import ChartIntegrationDialog
 
 
 class ScanWorker(QThread):
@@ -282,6 +284,7 @@ class MainWindow(QMainWindow):
         self.models = get_model_registry()
         self.report_workspace: Optional[ReportWorkspace] = None
         self.report_data: Optional[dict] = None
+        self.visualizations = None  # Visualization bundle
         self.ingested_chunks: list[dict] = []
         self.rule_findings: list[dict] = []
         self.report_state = ReportState()
@@ -460,6 +463,50 @@ class MainWindow(QMainWindow):
         
         layout.addStretch()
         
+        # View Charts button
+        self.view_charts_btn = QPushButton("📊 View Charts")
+        self.view_charts_btn.setEnabled(False)
+        self.view_charts_btn.clicked.connect(self._view_visualizations)
+        self.view_charts_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #34a853;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #2d8659;
+            }
+            QPushButton:disabled {
+                background-color: #c0c0c0;
+            }
+        """)
+        layout.addWidget(self.view_charts_btn)
+        
+        # Customize Charts button
+        self.customize_charts_btn = QPushButton("⚙ Customize & Embed Charts")
+        self.customize_charts_btn.setEnabled(False)
+        self.customize_charts_btn.clicked.connect(self._customize_and_embed_charts)
+        self.customize_charts_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #ff9800;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #f57c00;
+            }
+            QPushButton:disabled {
+                background-color: #c0c0c0;
+            }
+        """)
+        layout.addWidget(self.customize_charts_btn)
+        
         # Finalize button
         self.finalize_btn = QPushButton("Finalize Report")
         self.finalize_btn.setEnabled(False)
@@ -587,11 +634,30 @@ class MainWindow(QMainWindow):
                 template="default"
             )
             
+            # Generate visualizations
+            try:
+                orchestrator = VisualizationOrchestrator(cache_enabled=True)
+                self.visualizations = orchestrator.generate_visualizations(enhanced, export_dpi=300)
+                self.report_data["visualizations"] = {
+                    "risk_score": self.visualizations.risk_score,
+                    "risk_level": self.visualizations.risk_level,
+                    "image_paths": self.visualizations.get_image_paths(),
+                }
+                self.chat_pane.add_message(
+                    f"✓ Visualizations generated: Risk Score {self.visualizations.risk_score:.1f}/100 ({self.visualizations.risk_level})",
+                    is_user=False
+                )
+            except Exception as e:
+                self.logger.warning(f"Failed to generate visualizations: {e}")
+                self.visualizations = None
+            
             # Display in editor
             report_text = self._format_report_for_display(self.report_data)
             self.report_editor.setPlainText(report_text)
             
             self.finalize_btn.setEnabled(True)
+            self.view_charts_btn.setEnabled(True)
+            self.customize_charts_btn.setEnabled(True)
             self.chat_pane.add_message(
                 f"✓ Analysis complete!\n\n"
                 f"Found {len(findings)} potential issue(s).\n"
@@ -641,6 +707,18 @@ class MainWindow(QMainWindow):
         lines.append(f"High Severity: {severity_breakdown.get('High', 0)}")
         lines.append(f"Medium Severity: {severity_breakdown.get('Medium', 0)}")
         lines.append(f"Low Severity: {severity_breakdown.get('Low', 0)}")
+        
+        # Add visualization metrics
+        viz_data = report_data.get("visualizations", {})
+        if viz_data:
+            lines.append("")
+            lines.append("RISK ASSESSMENT")
+            lines.append("-" * 70)
+            lines.append(f"Overall Risk Score: {viz_data.get('risk_score', 0):.1f}/100")
+            lines.append(f"Risk Level: {viz_data.get('risk_level', 'N/A')}")
+            lines.append("")
+            lines.append("📊 Charts generated: Severity | Categories | Files | Confidence | Risk Gauge")
+            lines.append("")
         
         lines.append("=" * 70)
         lines.append("")
@@ -817,10 +895,133 @@ class MainWindow(QMainWindow):
         
         self.report_editor.set_finalized(True)
         self.finalize_btn.setEnabled(False)
+        self.view_charts_btn.setEnabled(True)  # Keep charts viewable even when finalized
         self.export_btn.setEnabled(True)
         
         self.chat_pane.add_message(
             "✓ Report finalized! You can now export it using the Export button.",
+            is_user=False
+        )
+    
+    def _view_visualizations(self):
+        """Display vulnerability visualizations in a new window."""
+        if not hasattr(self, 'visualizations') or not self.visualizations:
+            self.chat_pane.add_message("No visualizations available. Run analysis first.", is_user=False)
+            return
+        
+        try:
+            from PySide6.QtWidgets import QDialog, QVBoxLayout, QScrollArea, QLabel, QWidget
+            from PySide6.QtGui import QPixmap
+            from PySide6.QtCore import Qt
+            
+            # Create dialog window
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Vulnerability Analysis Charts")
+            dialog.setGeometry(100, 100, 1200, 800)
+            
+            layout = QVBoxLayout()
+            layout.setSpacing(20)
+            layout.setContentsMargins(20, 20, 20, 20)
+            
+            # Create scroll area
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setStyleSheet("QScrollArea { background-color: white; }")
+            
+            scroll_content = QWidget()
+            scroll_layout = QVBoxLayout()
+            scroll_layout.setSpacing(30)
+            scroll_layout.setContentsMargins(10, 10, 10, 10)
+            
+            # Add title
+            title = QLabel("Vulnerability Analysis Visualizations")
+            title.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+            scroll_layout.addWidget(title)
+            
+            # Risk score summary
+            if self.visualizations:
+                summary = QLabel(
+                    f"<b>Overall Risk Score:</b> {self.visualizations.risk_score:.1f}/100 "
+                    f"<b style='color: #d32f2f;'>({self.visualizations.risk_level})</b>"
+                )
+                summary.setFont(QFont("Segoe UI", 12))
+                scroll_layout.addWidget(summary)
+            
+            scroll_layout.addSpacing(10)
+            
+            # Add charts
+            paths = self.visualizations.get_image_paths()
+            titles = {
+                "severity": "Severity Distribution",
+                "category": "Vulnerability Categories",
+                "file_distribution": "Findings per File",
+                "confidence": "Confidence Scores",
+                "risk_gauge": "Risk Assessment Gauge",
+            }
+            
+            for key, title in titles.items():
+                path = paths.get(key)
+                if path and os.path.exists(path):
+                    # Chart title
+                    chart_title = QLabel(f"<b>{title}</b>")
+                    chart_title.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+                    scroll_layout.addWidget(chart_title)
+                    
+                    # Chart image
+                    try:
+                        img_label = QLabel()
+                        pixmap = QPixmap(path)
+                        # Scale to fit but maintain aspect ratio
+                        scaled_pixmap = pixmap.scaledToWidth(1000, Qt.TransformationMode.SmoothTransformation)
+                        img_label.setPixmap(scaled_pixmap)
+                        img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                        scroll_layout.addWidget(img_label)
+                        scroll_layout.addSpacing(20)
+                    except Exception as e:
+                        self.logger.warning(f"Failed to load image {path}: {e}")
+                        error_label = QLabel(f"Could not load image: {path}")
+                        error_label.setStyleSheet("color: red;")
+                        scroll_layout.addWidget(error_label)
+            
+            scroll_layout.addStretch()
+            scroll_content.setLayout(scroll_layout)
+            scroll.setWidget(scroll_content)
+            
+            layout.addWidget(scroll)
+            dialog.setLayout(layout)
+            dialog.exec()
+            
+        except Exception as e:
+            self.logger.error(f"Failed to display visualizations: {e}")
+            self.chat_pane.add_message(f"Error displaying visualizations: {str(e)}", is_user=False)
+    
+    def _customize_and_embed_charts(self):
+        """Open chart customization dialog."""
+        if not self.rule_findings:
+            self.chat_pane.add_message(
+                "No findings to visualize. Run analysis first.",
+                is_user=False
+            )
+            return
+        
+        try:
+            # Create and show customization dialog
+            dialog = ChartIntegrationDialog(self.rule_findings, parent=self)
+            dialog.charts_applied.connect(self._on_charts_applied)
+            dialog.exec()
+        except Exception as e:
+            self.logger.error(f"Error opening chart customization: {e}")
+            self.chat_pane.add_message(
+                f"Error: Failed to open chart customization. {str(e)}",
+                is_user=False
+            )
+    
+    def _on_charts_applied(self, config: Dict[str, Any]):
+        """Handle charts being applied and embedded."""
+        self.chat_pane.add_message(
+            "✓ Charts embedded into your report!\n\n"
+            "You can now edit the report text around the charts.\n"
+            "Use 'Finalize Report' to save your changes.",
             is_user=False
         )
     
