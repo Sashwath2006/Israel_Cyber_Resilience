@@ -31,17 +31,19 @@ from app.ai_assistant import (
     RewriteContext,
     detect_report_section
 )
-from app.report_exporter import export_to_markdown, export_to_pdf
 from app.report_state import ReportState, ReportStatus
 from app.logging_config import get_logger
-from app.visualization import VisualizationOrchestrator
 from app.auth import session_manager, user_manager, access_control, require_auth, require_permission
 from app.report_edit_engine import ReportEditEngine
 from app.report_version_manager import ReportVersionManager
 from app.report_edit_ui import EditUIHandler
 from app.ui.report_editor import ReportEditor
 from app.ui.editor_toolbar import EditorToolbar
-from app.ui.chart_integration import ChartIntegrationDialog
+from app.ui.chat_ui import ChatInterface
+from app.ui.modern_theme import (
+    DeepSpaceColors, ModernTypography, ModernSpacing, ModernBorderRadius,
+    ModernShadow, generate_button_stylesheet, generate_global_stylesheet
+)
 
 
 class ScanWorker(QThread):
@@ -81,197 +83,14 @@ class ScanWorker(QThread):
             self.error_occurred.emit(str(e))
 
 
-class ChatMessage(QWidget):
-    """Single chat message bubble."""
-    def __init__(self, text: str, is_user: bool, parent=None):
-        super().__init__(parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 6, 12, 6)
-        
-        # Message bubble
-        bubble = QFrame()
-        bubble.setMaximumWidth(600)
-        bubble_layout = QVBoxLayout(bubble)
-        bubble_layout.setContentsMargins(16, 12, 16, 12)
-        
-        # Message text
-        label = QLabel(text)
-        label.setWordWrap(True)
-        label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        label.setFont(QFont("Segoe UI", 10))
-        bubble_layout.addWidget(label)
-        
-        # Styling
-        if is_user:
-            bubble.setStyleSheet("""
-                QFrame {
-                    background-color: #0084ff;
-                    border-radius: 18px;
-                    color: white;
-                }
-            """)
-            layout.addStretch()
-            layout.addWidget(bubble)
-        else:
-            bubble.setStyleSheet("""
-                QFrame {
-                    background-color: #e4e6eb;
-                    border-radius: 18px;
-                    color: #050505;
-                }
-            """)
-            layout.addWidget(bubble)
-            layout.addStretch()
-
-
-class ChatPane(QWidget):
-    """ChatGPT-style chat pane."""
-    send_message = Signal(str)
-    upload_files = Signal(list)
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setStyleSheet("background-color: white;")
-        
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        
-        # Chat messages area
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        
-        self.messages_container = QWidget()
-        self.messages_layout = QVBoxLayout(self.messages_container)
-        self.messages_layout.setContentsMargins(8, 8, 8, 8)
-        self.messages_layout.setSpacing(8)
-        self.messages_layout.addStretch()
-        
-        scroll.setWidget(self.messages_container)
-        layout.addWidget(scroll, 1)
-        
-        # Input bar
-        input_bar = self._create_input_bar()
-        layout.addWidget(input_bar)
-        
-    def _create_input_bar(self) -> QWidget:
-        """Create fixed bottom input bar."""
-        bar = QFrame()
-        bar.setFrameShape(QFrame.Shape.StyledPanel)
-        bar.setStyleSheet("""
-            QFrame {
-                background-color: white;
-                border-top: 1px solid #e0e0e0;
-            }
-        """)
-        bar.setFixedHeight(70)
-        
-        layout = QHBoxLayout(bar)
-        layout.setContentsMargins(12, 8, 12, 8)
-        layout.setSpacing(8)
-        
-        # Upload button
-        upload_btn = QPushButton("+")
-        upload_btn.setFixedSize(40, 40)
-        upload_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f0f0f0;
-                border: none;
-                border-radius: 20px;
-                font-size: 20pt;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #e0e0e0;
-            }
-        """)
-        upload_btn.clicked.connect(self._handle_upload)
-        layout.addWidget(upload_btn)
-        
-        # Text input
-        self.input_field = QTextEdit()
-        self.input_field.setPlaceholderText("Message AI Assistant...")
-        self.input_field.setFixedHeight(46)
-        self.input_field.setStyleSheet("""
-            QTextEdit {
-                border: 1px solid #d0d0d0;
-                border-radius: 20px;
-                padding: 10px 16px;
-                font-size: 10pt;
-            }
-        """)
-        self.input_field.installEventFilter(self)
-        layout.addWidget(self.input_field, 1)
-        
-        # Send button
-        send_btn = QPushButton("⬆")
-        send_btn.setFixedSize(40, 40)
-        send_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #0084ff;
-                border: none;
-                border-radius: 20px;
-                color: white;
-                font-size: 16pt;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #0073e6;
-            }
-        """)
-        send_btn.clicked.connect(self._handle_send)
-        layout.addWidget(send_btn)
-        
-        return bar
-    
-    def eventFilter(self, obj, event):
-        """Handle Enter/Shift+Enter in text input."""
-        if obj == self.input_field and event.type() == event.Type.KeyPress:
-            if event.key() == Qt.Key.Key_Return and not event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
-                self._handle_send()
-                return True
-        return super().eventFilter(obj, event)
-    
-    def _handle_send(self):
-        """Send message."""
-        text = self.input_field.toPlainText().strip()
-        if text:
-            self.add_message(text, is_user=True)
-            self.send_message.emit(text)
-            self.input_field.clear()
-    
-    def _handle_upload(self):
-        """Handle file upload."""
-        paths, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Select Files to Analyze",
-            "",
-            "All Files (*.*)"
-        )
-        if paths:
-            self.upload_files.emit(paths)
-    
-    def add_message(self, text: str, is_user: bool):
-        """Add a message to the chat."""
-        msg = ChatMessage(text, is_user)
-        self.messages_layout.insertWidget(self.messages_layout.count() - 1, msg)
-        
-        # Auto-scroll to bottom
-        QWidget.update(self.messages_container)
-        scroll = self.messages_container.parentWidget().parentWidget()
-        if isinstance(scroll, QScrollArea):
-            scroll.verticalScrollBar().setValue(scroll.verticalScrollBar().maximum())
-
-
-
-
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Vulnerability Analysis Workbench")
         self.resize(1600, 900)
+        
+        # Apply modern theme globally
+        self.setStyleSheet(generate_global_stylesheet())
         
         # Logger
         self.logger = get_logger("MainWindow")
@@ -284,7 +103,6 @@ class MainWindow(QMainWindow):
         self.models = get_model_registry()
         self.report_workspace: Optional[ReportWorkspace] = None
         self.report_data: Optional[dict] = None
-        self.visualizations = None  # Visualization bundle
         self.ingested_chunks: list[dict] = []
         self.rule_findings: list[dict] = []
         self.report_state = ReportState()
@@ -332,7 +150,7 @@ class MainWindow(QMainWindow):
         Returns:
             True if user has permission, False otherwise
         """
-        if not self.session_token:
+        if not self.session_token or not self.current_user:
             return False
         
         # Validate session
@@ -382,7 +200,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         
-        # Top toolbar: Model selector and export
+        # Top toolbar: Model selector
         layout.addWidget(self._create_toolbar())
         
         # Main splitter: Left (Report) | Right (Chat)
@@ -405,7 +223,7 @@ class MainWindow(QMainWindow):
         splitter.addWidget(editor_container)
         
         # RIGHT PANE: Chat Assistant
-        self.chat_pane = ChatPane()
+        self.chat_pane = ChatInterface()
         self.chat_pane.send_message.connect(self._handle_user_message)
         self.chat_pane.upload_files.connect(self._handle_file_upload)
         splitter.addWidget(self.chat_pane)
@@ -427,133 +245,141 @@ class MainWindow(QMainWindow):
         )
     
     def _create_toolbar(self) -> QWidget:
-        """Create top toolbar with model selector and actions."""
+        """Create modern unified header with model selector and finalize button."""
         toolbar = QFrame()
-        toolbar.setFrameShape(QFrame.Shape.StyledPanel)
-        toolbar.setStyleSheet("""
-            QFrame {
-                background-color: #f8f8f8;
-                border-bottom: 1px solid #d0d0d0;
-            }
+        toolbar.setFrameShape(QFrame.Shape.NoFrame)
+        toolbar.setStyleSheet(f"""
+            QFrame {{
+                background-color: {DeepSpaceColors.BG_DARK};
+                border-bottom: 1px solid {DeepSpaceColors.BORDER_LIGHT};
+                padding: {ModernSpacing.MD}px;
+            }}
         """)
-        toolbar.setFixedHeight(50)
+        toolbar.setFixedHeight(60)
         
         layout = QHBoxLayout(toolbar)
-        layout.setContentsMargins(12, 0, 12, 0)
-        layout.setSpacing(12)
+        layout.setContentsMargins(ModernSpacing.LG, ModernSpacing.MD, ModernSpacing.LG, ModernSpacing.MD)
+        layout.setSpacing(ModernSpacing.LG)
+        
+        # Title/Logo
+        title = QLabel("🛡 Security Audit Workbench")
+        title_font = QFont(ModernTypography.PRIMARY_FONT, ModernTypography.SIZE_LG)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        title.setStyleSheet(f"color: {DeepSpaceColors.ACCENT_BLUE};")
+        layout.addWidget(title)
+        
+        layout.addSpacing(ModernSpacing.LG)
+        
+        # Model selector label
+        model_label = QLabel("Model:")
+        model_label.setFont(QFont(ModernTypography.PRIMARY_FONT, ModernTypography.SIZE_BASE))
+        model_label.setStyleSheet(f"color: {DeepSpaceColors.TEXT_SECONDARY};")
+        layout.addWidget(model_label)
         
         # Model selector
-        label = QLabel("Model:")
-        label.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        layout.addWidget(label)
-        
         self.model_selector = QComboBox()
         for m in self.models:
             self.model_selector.addItem(m["name"])
         self.model_selector.setMinimumWidth(200)
-        self.model_selector.setStyleSheet("""
-            QComboBox {
-                border: 1px solid #c0c0c0;
-                border-radius: 4px;
-                padding: 4px 8px;
-                background-color: white;
-            }
+        self.model_selector.setMaximumWidth(250)
+        self.model_selector.setStyleSheet(f"""
+            QComboBox {{
+                background-color: {DeepSpaceColors.BG_DARK_ALT};
+                color: {DeepSpaceColors.TEXT_PRIMARY};
+                border: 1px solid {DeepSpaceColors.BORDER_LIGHT};
+                border-radius: {ModernBorderRadius.MD}px;
+                padding: 6px 10px;
+                font-family: {ModernTypography.PRIMARY_FONT};
+                font-size: {ModernTypography.SIZE_BASE}px;
+                min-height: 32px;
+            }}
+            QComboBox:hover {{
+                border: 1px solid {DeepSpaceColors.ACCENT_BLUE_DIM};
+                background-color: {DeepSpaceColors.BG_SECONDARY};
+            }}
+            QComboBox:focus {{
+                border: 1px solid {DeepSpaceColors.ACCENT_BLUE};
+                background-color: {DeepSpaceColors.BG_SECONDARY};
+            }}
         """)
         layout.addWidget(self.model_selector)
         
+        # Status indicator (pulsing dot)
+        status_dot = QLabel("●")
+        status_dot.setStyleSheet(f"""
+            QLabel {{
+                color: {DeepSpaceColors.ACCENT_LIME};
+                font-size: 12px;
+                padding: 0px 4px;
+            }}
+        """)
+        layout.addWidget(status_dot)
+        
         layout.addStretch()
         
-        # View Charts button
-        self.view_charts_btn = QPushButton("📊 View Charts")
-        self.view_charts_btn.setEnabled(False)
-        self.view_charts_btn.clicked.connect(self._view_visualizations)
-        self.view_charts_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #34a853;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #2d8659;
-            }
-            QPushButton:disabled {
-                background-color: #c0c0c0;
-            }
-        """)
-        layout.addWidget(self.view_charts_btn)
-        
-        # Customize Charts button
-        self.customize_charts_btn = QPushButton("⚙ Customize & Embed Charts")
-        self.customize_charts_btn.setEnabled(False)
-        self.customize_charts_btn.clicked.connect(self._customize_and_embed_charts)
-        self.customize_charts_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #ff9800;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #f57c00;
-            }
-            QPushButton:disabled {
-                background-color: #c0c0c0;
-            }
-        """)
-        layout.addWidget(self.customize_charts_btn)
-        
-        # Finalize button
-        self.finalize_btn = QPushButton("Finalize Report")
+        # Finalize button with glow effect
+        self.finalize_btn = QPushButton("✓ Finalize Report")
         self.finalize_btn.setEnabled(False)
         self.finalize_btn.clicked.connect(self._finalize_report)
-        self.finalize_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #0084ff;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #0073e6;
-            }
-            QPushButton:disabled {
-                background-color: #c0c0c0;
-            }
+        self.finalize_btn.setMinimumHeight(36)
+        self.finalize_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {DeepSpaceColors.TEXT_PRIMARY};
+                border: 1.5px solid {DeepSpaceColors.ACCENT_BLUE_DIM};
+                border-radius: {ModernBorderRadius.MD}px;
+                padding: 8px 20px;
+                font-weight: {ModernTypography.WEIGHT_SEMIBOLD};
+                font-size: {ModernTypography.SIZE_BASE}px;
+                font-family: {ModernTypography.PRIMARY_FONT};
+            }}
+            QPushButton:hover {{
+                background-color: rgba(0, 217, 255, 0.1);
+                border: 1.5px solid {DeepSpaceColors.ACCENT_BLUE};
+                color: {DeepSpaceColors.ACCENT_BLUE};
+            }}
+            QPushButton:pressed {{
+                background-color: rgba(0, 217, 255, 0.2);
+            }}
+            QPushButton:disabled {{
+                background-color: transparent;
+                color: {DeepSpaceColors.TEXT_MUTED};
+                border: 1.5px solid {DeepSpaceColors.BORDER_LIGHT};
+            }}
         """)
         layout.addWidget(self.finalize_btn)
         
-        # Export menu
-        self.export_btn = QPushButton("Export ▼")
+        # Export button
+        self.export_btn = QPushButton("⤓ Export")
         self.export_btn.setEnabled(False)
-        self.export_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #28a745;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #218838;
-            }
-            QPushButton:disabled {
-                background-color: #c0c0c0;
-            }
+        self.export_btn.clicked.connect(self._show_export_menu)
+        self.export_btn.setMinimumHeight(36)
+        self.export_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {DeepSpaceColors.TEXT_PRIMARY};
+                border: 1.5px solid {DeepSpaceColors.ACCENT_BLUE_DIM};
+                border-radius: {ModernBorderRadius.MD}px;
+                padding: 8px 20px;
+                font-weight: {ModernTypography.WEIGHT_SEMIBOLD};
+                font-size: {ModernTypography.SIZE_BASE}px;
+                font-family: {ModernTypography.PRIMARY_FONT};
+            }}
+            QPushButton:hover {{
+                background-color: rgba(0, 217, 255, 0.1);
+                border: 1.5px solid {DeepSpaceColors.ACCENT_BLUE};
+                color: {DeepSpaceColors.ACCENT_BLUE};
+            }}
+            QPushButton:pressed {{
+                background-color: rgba(0, 217, 255, 0.2);
+            }}
+            QPushButton:disabled {{
+                background-color: transparent;
+                color: {DeepSpaceColors.TEXT_MUTED};
+                border: 1.5px solid {DeepSpaceColors.BORDER_LIGHT};
+            }}
         """)
-        
-        export_menu = QMenu(self)
-        export_menu.addAction("Export as Markdown", self._export_markdown)
-        export_menu.addAction("Export as PDF", self._export_pdf)
-        self.export_btn.setMenu(export_menu)
-        
         layout.addWidget(self.export_btn)
         
         return toolbar
@@ -634,30 +460,11 @@ class MainWindow(QMainWindow):
                 template="default"
             )
             
-            # Generate visualizations
-            try:
-                orchestrator = VisualizationOrchestrator(cache_enabled=True)
-                self.visualizations = orchestrator.generate_visualizations(enhanced, export_dpi=300)
-                self.report_data["visualizations"] = {
-                    "risk_score": self.visualizations.risk_score,
-                    "risk_level": self.visualizations.risk_level,
-                    "image_paths": self.visualizations.get_image_paths(),
-                }
-                self.chat_pane.add_message(
-                    f"✓ Visualizations generated: Risk Score {self.visualizations.risk_score:.1f}/100 ({self.visualizations.risk_level})",
-                    is_user=False
-                )
-            except Exception as e:
-                self.logger.warning(f"Failed to generate visualizations: {e}")
-                self.visualizations = None
-            
             # Display in editor
             report_text = self._format_report_for_display(self.report_data)
             self.report_editor.setPlainText(report_text)
             
             self.finalize_btn.setEnabled(True)
-            self.view_charts_btn.setEnabled(True)
-            self.customize_charts_btn.setEnabled(True)
             self.chat_pane.add_message(
                 f"✓ Analysis complete!\n\n"
                 f"Found {len(findings)} potential issue(s).\n"
@@ -707,18 +514,6 @@ class MainWindow(QMainWindow):
         lines.append(f"High Severity: {severity_breakdown.get('High', 0)}")
         lines.append(f"Medium Severity: {severity_breakdown.get('Medium', 0)}")
         lines.append(f"Low Severity: {severity_breakdown.get('Low', 0)}")
-        
-        # Add visualization metrics
-        viz_data = report_data.get("visualizations", {})
-        if viz_data:
-            lines.append("")
-            lines.append("RISK ASSESSMENT")
-            lines.append("-" * 70)
-            lines.append(f"Overall Risk Score: {viz_data.get('risk_score', 0):.1f}/100")
-            lines.append(f"Risk Level: {viz_data.get('risk_level', 'N/A')}")
-            lines.append("")
-            lines.append("📊 Charts generated: Severity | Categories | Files | Confidence | Risk Gauge")
-            lines.append("")
         
         lines.append("=" * 70)
         lines.append("")
@@ -780,13 +575,15 @@ class MainWindow(QMainWindow):
             if text_lower == "undo":
                 if not self.edit_ui_handler:
                     self._initialize_edit_handler()
-                self.edit_ui_handler.handle_undo()
+                if self.edit_ui_handler:
+                    self.edit_ui_handler.handle_undo()
                 return
             
             if text_lower == "history":
                 if not self.edit_ui_handler:
                     self._initialize_edit_handler()
-                self.edit_ui_handler.show_version_history()
+                if self.edit_ui_handler:
+                    self.edit_ui_handler.show_version_history()
                 return
             
             # REWRITE INTENT DETECTION
@@ -796,6 +593,13 @@ class MainWindow(QMainWindow):
                 # Initialize edit handler if needed
                 if not self.edit_ui_handler:
                     self._initialize_edit_handler()
+                
+                if not self.edit_ui_handler:
+                    self.chat_pane.add_message(
+                        "⚠ Failed to initialize edit handler. Please try again.",
+                        is_user=False
+                    )
+                    return
                 
                 # Get selected text from report
                 cursor = self.report_editor.textCursor()
@@ -840,11 +644,14 @@ class MainWindow(QMainWindow):
                 text_before = all_text[:cursor_pos]
                 section = detect_report_section(text_before)
                 
+                # Convert section to string if it's an enum
+                section_str = section.value if hasattr(section, 'value') else str(section)
+                
                 # Handle edit request through UI handler
                 self.edit_ui_handler.handle_edit_request(
                     user_message=text,
                     selected_text=selected_text,
-                    section_name=section.value
+                    section_name=section_str
                 )
                 return
             
@@ -895,181 +702,84 @@ class MainWindow(QMainWindow):
         
         self.report_editor.set_finalized(True)
         self.finalize_btn.setEnabled(False)
-        self.view_charts_btn.setEnabled(True)  # Keep charts viewable even when finalized
-        self.export_btn.setEnabled(True)
+        self.export_btn.setEnabled(True)  # Enable export after finalize
         
         self.chat_pane.add_message(
-            "✓ Report finalized! You can now export it using the Export button.",
+            "✓ Report finalized! You can now export the report.",
             is_user=False
         )
     
-    def _view_visualizations(self):
-        """Display vulnerability visualizations in a new window."""
-        if not hasattr(self, 'visualizations') or not self.visualizations:
-            self.chat_pane.add_message("No visualizations available. Run analysis first.", is_user=False)
+    def _show_export_menu(self):
+        """Show export format menu."""
+        # Check if user has permission to export
+        if not self._check_permission("export_reports"):
+            self.chat_pane.add_message("[ERROR] Permission denied: export_reports required", is_user=False)
             return
         
+        # Create export menu
+        menu = QMenu(self)
+        
+        # Export to Markdown
+        md_action = menu.addAction("Export as Markdown")
+        md_action.triggered.connect(lambda: self._export_report("markdown"))
+        
+        # Export to PDF
+        pdf_action = menu.addAction("Export as PDF")
+        pdf_action.triggered.connect(lambda: self._export_report("pdf"))
+        
+        # Show menu at export button position
+        menu.exec(self.export_btn.mapToGlobal(self.export_btn.rect().bottomLeft()))
+    
+    def _export_report(self, format: str):
+        """Export report in specified format."""
+        from app.report_exporter import export_to_markdown, export_to_pdf
+        
         try:
-            from PySide6.QtWidgets import QDialog, QVBoxLayout, QScrollArea, QLabel, QWidget
-            from PySide6.QtGui import QPixmap
-            from PySide6.QtCore import Qt
+            # Get reported data
+            report_data = self.report_state.get_state()
             
-            # Create dialog window
-            dialog = QDialog(self)
-            dialog.setWindowTitle("Vulnerability Analysis Charts")
-            dialog.setGeometry(100, 100, 1200, 800)
-            
-            layout = QVBoxLayout()
-            layout.setSpacing(20)
-            layout.setContentsMargins(20, 20, 20, 20)
-            
-            # Create scroll area
-            scroll = QScrollArea()
-            scroll.setWidgetResizable(True)
-            scroll.setStyleSheet("QScrollArea { background-color: white; }")
-            
-            scroll_content = QWidget()
-            scroll_layout = QVBoxLayout()
-            scroll_layout.setSpacing(30)
-            scroll_layout.setContentsMargins(10, 10, 10, 10)
-            
-            # Add title
-            title = QLabel("Vulnerability Analysis Visualizations")
-            title.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
-            scroll_layout.addWidget(title)
-            
-            # Risk score summary
-            if self.visualizations:
-                summary = QLabel(
-                    f"<b>Overall Risk Score:</b> {self.visualizations.risk_score:.1f}/100 "
-                    f"<b style='color: #d32f2f;'>({self.visualizations.risk_level})</b>"
-                )
-                summary.setFont(QFont("Segoe UI", 12))
-                scroll_layout.addWidget(summary)
-            
-            scroll_layout.addSpacing(10)
-            
-            # Add charts
-            paths = self.visualizations.get_image_paths()
-            titles = {
-                "severity": "Severity Distribution",
-                "category": "Vulnerability Categories",
-                "file_distribution": "Findings per File",
-                "confidence": "Confidence Scores",
-                "risk_gauge": "Risk Assessment Gauge",
+            # Open file dialog
+            filter_map = {
+                "markdown": "Markdown Files (*.md)",
+                "pdf": "PDF Files (*.pdf)"
+            }
+            ext_map = {
+                "markdown": "md",
+                "pdf": "pdf"
             }
             
-            for key, title in titles.items():
-                path = paths.get(key)
-                if path and os.path.exists(path):
-                    # Chart title
-                    chart_title = QLabel(f"<b>{title}</b>")
-                    chart_title.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
-                    scroll_layout.addWidget(chart_title)
-                    
-                    # Chart image
-                    try:
-                        img_label = QLabel()
-                        pixmap = QPixmap(path)
-                        # Scale to fit but maintain aspect ratio
-                        scaled_pixmap = pixmap.scaledToWidth(1000, Qt.TransformationMode.SmoothTransformation)
-                        img_label.setPixmap(scaled_pixmap)
-                        img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                        scroll_layout.addWidget(img_label)
-                        scroll_layout.addSpacing(20)
-                    except Exception as e:
-                        self.logger.warning(f"Failed to load image {path}: {e}")
-                        error_label = QLabel(f"Could not load image: {path}")
-                        error_label.setStyleSheet("color: red;")
-                        scroll_layout.addWidget(error_label)
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                f"Export Report as {format.upper()}",
+                f"report.{ext_map[format]}",
+                filter_map[format]
+            )
             
-            scroll_layout.addStretch()
-            scroll_content.setLayout(scroll_layout)
-            scroll.setWidget(scroll_content)
+            if not file_path:
+                return
             
-            layout.addWidget(scroll)
-            dialog.setLayout(layout)
-            dialog.exec()
+            # Export based on format
+            success = False
+            error_msg = ""
             
+            if format == "markdown":
+                success, error_msg = export_to_markdown(report_data, self.report_workspace, file_path)
+            elif format == "pdf":
+                success, error_msg = export_to_pdf(report_data, self.report_workspace, file_path)
+            
+            # Notify user
+            if success:
+                self.chat_pane.add_message(
+                    f"✓ Report exported successfully to {file_path}",
+                    is_user=False
+                )
+            else:
+                self.chat_pane.add_message(
+                    f"[ERROR] Export failed: {error_msg}",
+                    is_user=False
+                )
         except Exception as e:
-            self.logger.error(f"Failed to display visualizations: {e}")
-            self.chat_pane.add_message(f"Error displaying visualizations: {str(e)}", is_user=False)
-    
-    def _customize_and_embed_charts(self):
-        """Open chart customization dialog."""
-        if not self.rule_findings:
             self.chat_pane.add_message(
-                "No findings to visualize. Run analysis first.",
+                f"[ERROR] Export error: {str(e)}",
                 is_user=False
             )
-            return
-        
-        try:
-            # Create and show customization dialog
-            dialog = ChartIntegrationDialog(self.rule_findings, parent=self)
-            dialog.charts_applied.connect(self._on_charts_applied)
-            dialog.exec()
-        except Exception as e:
-            self.logger.error(f"Error opening chart customization: {e}")
-            self.chat_pane.add_message(
-                f"Error: Failed to open chart customization. {str(e)}",
-                is_user=False
-            )
-    
-    def _on_charts_applied(self, config: Dict[str, Any]):
-        """Handle charts being applied and embedded."""
-        self.chat_pane.add_message(
-            "✓ Charts embedded into your report!\n\n"
-            "You can now edit the report text around the charts.\n"
-            "Use 'Finalize Report' to save your changes.",
-            is_user=False
-        )
-    
-    def _export_markdown(self):
-        """Export report to Markdown."""
-        # Check if user has permission to export reports
-        if not self._check_permission("export_reports"):
-            QMessageBox.warning(self, "Permission Denied", "Export permission required.")
-            return
-        
-        if not self.report_data:
-            QMessageBox.warning(self, "No Report", "Generate a report first.")
-            return
-        
-        path, _ = QFileDialog.getSaveFileName(self, "Export Markdown", "", "Markdown (*.md)")
-        if path:
-            success, error = export_to_markdown(self.report_data, self.report_workspace, path)
-            if success:
-                self.chat_pane.add_message(f"✓ Exported to: {path}", is_user=False)
-            else:
-                self.chat_pane.add_message(f"✗ Export failed: {error}", is_user=False)
-    
-    def _export_pdf(self):
-        """Export report to PDF with Markdown fallback."""
-        # Check if user has permission to export reports
-        if not self._check_permission("export_reports"):
-            QMessageBox.warning(self, "Permission Denied", "Export permission required.")
-            return
-        
-        if not self.report_data:
-            QMessageBox.warning(self, "No Report", "Generate a report first.")
-            return
-        
-        path, _ = QFileDialog.getSaveFileName(self, "Export PDF", "", "PDF (*.pdf)")
-        if path:
-            success, error = export_to_pdf(self.report_data, self.report_workspace, path)
-            if success:
-                self.chat_pane.add_message(f"✓ Exported to: {path}", is_user=False)
-            else:
-                # PDF export failed, offer Markdown fallback
-                self.logger.warning("PDF export failed, trying Markdown fallback", error=error)
-                md_path = path.replace('.pdf', '.md')
-                success, error = export_to_markdown(self.report_data, self.report_workspace, md_path)
-                if success:
-                    self.chat_pane.add_message(
-                        f"⚠ PDF export failed. Exported as Markdown instead: {md_path}\n\n"
-                        f"Technical details: {error}",
-                        is_user=False
-                    )
-                else:
-                    self.chat_pane.add_message(f"✗ Export failed: {error}", is_user=False)

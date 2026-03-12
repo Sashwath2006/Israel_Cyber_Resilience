@@ -39,7 +39,6 @@ class TestMainWindowInitialization:
         assert hasattr(window, 'chat_pane')
         assert hasattr(window, 'model_selector')
         assert hasattr(window, 'finalize_btn')
-        assert hasattr(window, 'export_btn')
 
 
 class TestScanWorker:
